@@ -213,7 +213,7 @@ export function formatAqiForPeriod(samples: WeatherSample[], period: Period): st
 export function formatHumidityForPeriod(samples: WeatherSample[], period: Period, showPercent = true): string {
   const sample = samples.find((item) => item.period === period)
 
-  if (!sample || sample.relativeHumidity === null)
+  if (!sample || typeof sample.relativeHumidity !== 'number')
     return showPercent ? '--%' : '--'
 
   return showPercent ? `${sample.relativeHumidity}%` : String(sample.relativeHumidity)
@@ -258,7 +258,7 @@ export function getDailyAqiStyle(samples: WeatherSample[]) {
 export function getHumidityStyle(samples: WeatherSample[], period: Period) {
   const sample = samples.find((item) => item.period === period)
 
-  if (!sample || sample.relativeHumidity === null)
+  if (!sample || typeof sample.relativeHumidity !== 'number')
     return undefined
 
   return {

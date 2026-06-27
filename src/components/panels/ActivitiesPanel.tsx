@@ -1,15 +1,17 @@
-import { PersonStanding, Plus } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ChevronRight, PersonStanding, Plus } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY, TAG_COLOR_PALETTE } from '../../domain/constants'
-import type { DiaryEntry } from '../../domain/types'
+import type { AppSettings, DiaryEntry } from '../../domain/types'
 import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
 import { updateEntryActivity } from '../../utils/diaryEntryHelpers'
 import { getRecentTags } from '../../utils/entries'
+import { getActivityColorGroupName } from '../../utils/settings'
 import { normalizeTag, normalizeTags } from '../../utils/tags'
 
 type ActivitiesPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
+  settings: AppSettings
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
@@ -19,6 +21,7 @@ type ActivitiesPanelProps = {
 export function ActivitiesPanel({
   draft,
   entries,
+  settings,
   onUpdateDraft,
   onDraftChange,
   onEntriesChange,
@@ -31,10 +34,48 @@ export function ActivitiesPanel({
   const [editingActivityColor, setEditingActivityColor] = useState(DEFAULT_TAG_COLOR)
   const [isActivityAddOpen, setIsActivityAddOpen] = useState(false)
   const [isOtherActivityDialogOpen, setIsOtherActivityDialogOpen] = useState(false)
+  const [expandedActivityColor, setExpandedActivityColor] = useState(DEFAULT_TAG_COLOR)
+  const activityAddRef = useRef<HTMLDivElement>(null)
   const availableRecentTags = useMemo(
     () => getRecentTags(entries).filter((tag) => !draft.tags.includes(tag.name)),
     [draft.tags, entries],
   )
+  const activityColorGroups = useMemo(() => {
+    const groups = new Map<string, typeof availableRecentTags>()
+
+    for (const tag of availableRecentTags) {
+      const color = tag.color || DEFAULT_TAG_COLOR
+      groups.set(color, [...(groups.get(color) ?? []), tag])
+    }
+
+    const customColors = Array.from(groups.keys()).filter((color) => !TAG_COLOR_PALETTE.includes(color))
+
+    return [...TAG_COLOR_PALETTE, ...customColors]
+      .map((color) => ({ color, tags: groups.get(color) ?? [] }))
+      .filter((group) => group.tags.length)
+  }, [availableRecentTags])
+  const visibleExpandedActivityColor = activityColorGroups.some((group) => group.color === expandedActivityColor)
+    ? expandedActivityColor
+    : activityColorGroups[0]?.color ?? DEFAULT_TAG_COLOR
+
+  useEffect(() => {
+    if (!isActivityAddOpen)
+      return
+
+    function closeActivityAddOnOutsideClick(event: PointerEvent) {
+      if (!(event.target instanceof Node))
+        return
+
+      if (!activityAddRef.current || activityAddRef.current.contains(event.target))
+        return
+
+      setIsActivityAddOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeActivityAddOnOutsideClick)
+
+    return () => document.removeEventListener('pointerdown', closeActivityAddOnOutsideClick)
+  }, [isActivityAddOpen])
 
   function addTag(rawTag: string, color = selectedTagColor) {
     const tag = normalizeTag(rawTag)
@@ -57,11 +98,6 @@ export function ActivitiesPanel({
     setTagInput('')
     setIsActivityAddOpen(false)
     setIsOtherActivityDialogOpen(false)
-  }
-
-  function addRecentTag(tagName: string) {
-    const recentTag = getRecentTags(entries).find((tag) => tag.name === tagName)
-    addTag(tagName, recentTag?.color ?? selectedTagColor)
   }
 
   function openOtherActivityDialog() {
@@ -124,7 +160,7 @@ export function ActivitiesPanel({
         <PersonStanding size={16} />
         Activities
       </div>
-      <div className="activity-chips">
+      <div className="activity-chips" ref={activityAddRef}>
         {draft.tags.map((tag) => (
           <button
             key={tag}
@@ -150,20 +186,48 @@ export function ActivitiesPanel({
         </button>
         {isActivityAddOpen && (
           <div className="activity-recent-popover">
-            {availableRecentTags.slice(0, 5).map((tag) => (
-              <button
-                key={tag.name}
-                type="button"
-                style={{
-                  backgroundColor: getTagBackgroundColor(tag.color),
-                  borderColor: tag.color,
-                  color: getTagTextColor(tag.color),
-                }}
-                onClick={() => addRecentTag(tag.name)}
-              >
-                {tag.name}
-              </button>
-            ))}
+            {activityColorGroups.map((group) => {
+              const isExpanded = group.color === visibleExpandedActivityColor
+
+              return (
+                <div
+                  className="activity-color-group"
+                  key={group.color}
+                  onMouseEnter={() => setExpandedActivityColor(group.color)}
+                >
+                  <button
+                    className="activity-color-toggle"
+                    type="button"
+                    title={`Activity color ${group.color}`}
+                    onClick={() => setExpandedActivityColor(group.color)}
+                  >
+                    <span className="activity-color-toggle-main">
+                      <span className="activity-color-dot" style={{ backgroundColor: group.color }} />
+                      <span>{getActivityColorGroupName(settings, group.color)}</span>
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+                  {isExpanded && (
+                    <div className="activity-color-options">
+                      {group.tags.map((tag) => (
+                        <button
+                          key={tag.name}
+                          type="button"
+                          style={{
+                            backgroundColor: getTagBackgroundColor(tag.color),
+                            borderColor: tag.color,
+                            color: getTagTextColor(tag.color),
+                          }}
+                          onClick={() => addTag(tag.name, tag.color)}
+                        >
+                          {tag.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
             <button className="activity-other-option" type="button" onClick={openOtherActivityDialog}>
               Other
             </button>

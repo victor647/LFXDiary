@@ -93,6 +93,7 @@ export type AppSettings = {
   gitAuthorEmail: string
   gitDiaryPath: string
   gitCorsProxy: string
+  activityColorGroupNames: Record<string, string>
 }
 
 export type DiaryCatalog = {

@@ -248,7 +248,7 @@ function getGitAuth(settings: AppSettings): { username?: string; password?: stri
 
 function getGitAuthor(settings: AppSettings): { name: string; email: string } {
   return {
-    name: settings.gitAuthorName || settings.gitUsername || 'LFX Diary',
+    name: settings.gitAuthorName || settings.gitUsername || 'Diary Book',
     email: settings.gitAuthorEmail || 'lfx-diary@example.local',
   }
 }

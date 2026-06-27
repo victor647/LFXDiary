@@ -1,5 +1,5 @@
 import { MapPin, Plus, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
 import type { City, DiaryEntry, GeocodingResult } from '../../domain/types'
 import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
@@ -34,6 +34,7 @@ export function LocationPanel({
   const [editingLocationName, setEditingLocationName] = useState('')
   const [editingLocationColor, setEditingLocationColor] = useState(DEFAULT_LOCATION_COLOR)
   const [pendingCity, setPendingCity] = useState<City | null>(null)
+  const locationAddRef = useRef<HTMLDivElement>(null)
   const availableRecentCities = useMemo(
     () =>
       getRecentCities(entries)
@@ -41,6 +42,25 @@ export function LocationPanel({
         .slice(0, 5),
     [draft.cities, entries],
   )
+
+  useEffect(() => {
+    if (!isLocationAddOpen)
+      return
+
+    function closeLocationAddOnOutsideClick(event: PointerEvent) {
+      if (!(event.target instanceof Node))
+        return
+
+      if (!locationAddRef.current || locationAddRef.current.contains(event.target))
+        return
+
+      setIsLocationAddOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeLocationAddOnOutsideClick)
+
+    return () => document.removeEventListener('pointerdown', closeLocationAddOnOutsideClick)
+  }, [isLocationAddOpen])
 
   function openOtherLocationDialog() {
     setIsLocationAddOpen(false)
@@ -167,7 +187,7 @@ export function LocationPanel({
         <MapPin size={16} />
         Location
       </div>
-      <div className="current-location-block">
+      <div className="current-location-block" ref={locationAddRef}>
         <div className="current-location-chips">
           {draft.cities.map((city) => (
             <button

@@ -1,4 +1,4 @@
-import type { DiaryEntry } from '../domain/types'
+import type { AppSettings, DiaryEntry } from '../domain/types'
 import { ActivitiesPanel } from './panels/ActivitiesPanel'
 import { DatePanel } from './panels/DatePanel'
 import { LocationPanel } from './panels/LocationPanel'
@@ -8,6 +8,7 @@ import { WeatherPanel } from './panels/WeatherPanel'
 type MetadataEditorProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
+  settings: AppSettings
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onUpdateDraftIfCurrent: (entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
@@ -19,6 +20,7 @@ type MetadataEditorProps = {
 export function MetadataEditor({
   draft,
   entries,
+  settings,
   onUpdateDraft,
   onUpdateDraftIfCurrent,
   onDraftChange,
@@ -47,6 +49,7 @@ export function MetadataEditor({
       <ActivitiesPanel
         draft={draft}
         entries={entries}
+        settings={settings}
         onUpdateDraft={onUpdateDraft}
         onDraftChange={onDraftChange}
         onEntriesChange={onEntriesChange}

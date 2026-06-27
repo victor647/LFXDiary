@@ -424,7 +424,12 @@ export function DiaryApp() {
         {currentPage === 'settings' ? (
           <SettingsPage
             settings={settings}
+            draft={draft}
+            entries={entries}
             onSettingsChange={setSettings}
+            onDraftChange={setDraft}
+            onEntriesChange={setEntries}
+            onStatusChange={setStatusMessage}
             onSave={persistSettings}
             onBack={() => setCurrentPage('diary')}
           />
@@ -433,6 +438,7 @@ export function DiaryApp() {
             <MetadataEditor
               draft={draft}
               entries={entries}
+              settings={settings}
               onUpdateDraft={updateDraft}
               onUpdateDraftIfCurrent={updateDraftIfCurrent}
               onDraftChange={setDraft}

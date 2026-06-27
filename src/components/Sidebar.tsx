@@ -78,8 +78,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="brand compact-brand">
         <div>
-          <h1>LFX Diary</h1>
-          <p>Local-first journal</p>
+          <h1>Diary Book</h1>
         </div>
         <div className="brand-actions">
           <button className="sidebar-icon-button" type="button" onClick={onNewEntry} title="New entry">

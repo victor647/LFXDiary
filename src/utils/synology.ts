@@ -157,14 +157,15 @@ export function getSynologyDisplayUrl(settings: AppSettings): string {
 }
 
 function getSynologyApiBaseUrl(settings: AppSettings): string {
-  if (isLocalDevServer())
+  if (usesSynologyProxy())
     return settings.nasMode === 'lan' ? `${window.location.origin}/nas-lan-api/` : `${window.location.origin}/nas-public-api/`
 
   return getActiveNasUrl(settings)
 }
 
-function isLocalDevServer(): boolean {
-  return typeof window !== 'undefined' && ['127.0.0.1', 'localhost'].includes(window.location.hostname)
+function usesSynologyProxy(): boolean {
+  return typeof window !== 'undefined'
+    && (window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname))
 }
 
 async function loginToSynology(baseUrl: string, username: string, password: string): Promise<SynologySession> {

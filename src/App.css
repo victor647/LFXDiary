@@ -471,6 +471,134 @@ label {
   color: var(--text-strong);
 }
 
+.tag-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tag-manager-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tag-manager-list-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tag-manager-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px 28px 28px;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.tag-manager-row input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.tag-manager-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 999px;
+}
+
+.tag-manager-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.tag-manager-palette {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(18px, 18px));
+  gap: 5px;
+}
+
+.tag-manager-palette button {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  border-color: rgba(17, 24, 39, 0.14);
+  border-radius: 999px;
+}
+
+.tag-manager-palette button.selected {
+  outline: 2px solid #1d3557;
+  outline-offset: 1px;
+}
+
+.tag-manager-icon-button {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.tag-manager-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.activity-manager-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.activity-manager-group-header,
+.activity-manager-tag-row {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.activity-manager-group-header {
+  grid-template-columns: 28px 16px minmax(0, 1fr) 28px;
+}
+
+.activity-manager-tag-row {
+  grid-template-columns: minmax(0, 1fr) 24px minmax(96px, 128px) 28px 28px;
+}
+
+.activity-manager-group-header input,
+.activity-manager-tag-row input,
+.activity-manager-tag-row select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.activity-manager-tags {
+  display: grid;
+  gap: 5px;
+  padding-left: 34px;
+}
+
 .settings-actions {
   display: flex;
   max-width: 680px;
@@ -494,10 +622,10 @@ label {
 .metadata-deck {
   display: grid;
   grid-template-columns:
-    minmax(230px, 0.9fr)
-    minmax(220px, 0.84fr)
-    minmax(220px, 0.84fr)
-    minmax(420px, 1.36fr)
+    minmax(210px, 0.9fr)
+    minmax(132px, 0.42fr)
+    minmax(138px, 0.42fr)
+    minmax(360px, 1.36fr)
     minmax(340px, 1.08fr);
   grid-template-areas: 'date location activities weather mood';
   gap: 6px;
@@ -516,7 +644,7 @@ label {
 
 .weather-panel {
   grid-area: weather;
-  min-width: 420px;
+  min-width: 360px;
 }
 
 .tag-panel {
@@ -527,7 +655,8 @@ label {
 .activity-chips {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 5px;
   min-width: 0;
   min-height: 28px;
@@ -562,7 +691,9 @@ label {
   right: 0;
   display: grid;
   gap: 5px;
-  min-width: 140px;
+  min-width: 168px;
+  max-width: min(240px, calc(100vw - 24px));
+  overflow: visible;
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -572,8 +703,63 @@ label {
 
 .activity-recent-popover button {
   justify-content: flex-start;
+  width: 100%;
+  max-width: none;
   min-height: 26px;
   padding: 0 8px;
+}
+
+.activity-color-group {
+  position: relative;
+  display: grid;
+  gap: 4px;
+}
+
+.activity-recent-popover .activity-color-toggle {
+  justify-content: space-between;
+  border-color: var(--border);
+  background: #fbfcfd;
+  color: var(--text-strong);
+}
+
+.activity-color-toggle-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.activity-color-toggle-main span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-color-dot {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 999px;
+}
+
+.activity-color-options {
+  position: absolute;
+  z-index: 13;
+  top: 0;
+  left: calc(100% + 7px);
+  display: grid;
+  gap: 4px;
+  width: 168px;
+  max-width: min(220px, calc(100vw - 24px));
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
 .activity-recent-popover .activity-other-option {
@@ -709,7 +895,8 @@ label {
 
 .current-location-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 5px;
   min-height: 28px;
   align-items: start;
@@ -1170,7 +1357,7 @@ label {
 
 .weather-pin-wrap {
   position: relative;
-  grid-column: 3;
+  grid-column: 2;
 }
 
 .weather-pin-button {
@@ -1265,19 +1452,29 @@ label {
 
 @media (max-width: 1500px) {
   .metadata-deck {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns:
+      minmax(210px, 1fr)
+      minmax(132px, max-content)
+      minmax(138px, max-content)
+      minmax(0, 1fr)
+      minmax(340px, max-content);
     grid-template-areas:
-      'date date location location activities activities'
-      'weather weather weather mood mood mood';
+      'date location activities . .'
+      'weather weather weather mood mood';
   }
 }
 
 @media (max-width: 1200px) {
   .metadata-deck {
+    grid-template-columns:
+      minmax(132px, max-content)
+      minmax(138px, max-content)
+      repeat(3, minmax(0, 1fr));
     grid-template-areas:
-      'date date location location activities activities'
-      'weather weather weather weather weather weather'
-      'mood mood mood mood mood mood';
+      'date date date date date'
+      'location activities . . .'
+      'weather weather weather weather weather'
+      'mood mood mood mood mood';
   }
 }
 
@@ -1315,5 +1512,9 @@ label {
   .mood-panel,
   .tag-panel {
     min-width: 0;
+  }
+
+  .tag-manager-grid {
+    grid-template-columns: 1fr;
   }
 }

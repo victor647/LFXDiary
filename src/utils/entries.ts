@@ -6,7 +6,7 @@ import {
   STORAGE_KEY,
   emptyMood,
 } from '../domain/constants'
-import type { City, DiaryEntry, NotebookGroup, RecentCity, RecentTag } from '../domain/types'
+import type { City, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
 import { normalizeTag, normalizeTagColors, normalizeTags } from './tags'
 
@@ -49,18 +49,19 @@ export function loadEntries(): DiaryEntry[] {
 
 export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
   const tags = normalizeTags(entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
+  const weatherSamples = normalizeWeatherSamples(entry.weatherSamples)
   const dailyWeatherCode =
     typeof entry.dailyWeatherCode === 'number'
       ? entry.dailyWeatherCode
-      : entry.weatherSamples.find((sample) => typeof sample.weatherCode === 'number')?.weatherCode ?? null
+      : weatherSamples.find((sample) => typeof sample.weatherCode === 'number')?.weatherCode ?? null
   const dailyWeatherText =
     entry.dailyWeatherText && entry.dailyWeatherText !== 'Not fetched'
       ? entry.dailyWeatherText
-      : entry.weatherSamples.find((sample) => sample.weatherText)?.weatherText ?? 'Not fetched'
+      : weatherSamples.find((sample) => sample.weatherText)?.weatherText ?? 'Not fetched'
   const dailyPrecipitationMm =
     typeof entry.dailyPrecipitationMm === 'number'
       ? entry.dailyPrecipitationMm
-      : entry.weatherSamples.find((sample) => typeof sample.dailyPrecipitationMm === 'number')?.dailyPrecipitationMm ?? 0
+      : weatherSamples.find((sample) => typeof sample.dailyPrecipitationMm === 'number')?.dailyPrecipitationMm ?? 0
 
   return {
     ...entry,
@@ -68,11 +69,35 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
     dailyWeatherCode,
     dailyWeatherText,
     dailyPrecipitationMm,
+    weatherSamples,
     tagColors: normalizeTagColors(entry.tagColors ?? {}, tags),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
     savedAt: entry.savedAt ?? entry.updatedAt ?? null,
     syncedAt: entry.syncedAt ?? null,
   }
+}
+
+function normalizeWeatherSamples(samples: unknown): WeatherSample[] {
+  if (!Array.isArray(samples))
+    return []
+
+  return samples
+    .map((sample) => {
+      if (!sample || typeof sample !== 'object')
+        return null
+
+      const weatherSample = sample as Partial<WeatherSample>
+
+      if (!weatherSample.period)
+        return null
+
+      return {
+        ...weatherSample,
+        usAqi: typeof weatherSample.usAqi === 'number' ? weatherSample.usAqi : null,
+        relativeHumidity: typeof weatherSample.relativeHumidity === 'number' ? weatherSample.relativeHumidity : null,
+      } as WeatherSample
+    })
+    .filter((sample): sample is WeatherSample => Boolean(sample))
 }
 
 export function upsertEntry(entries: DiaryEntry[], entry: DiaryEntry): DiaryEntry[] {

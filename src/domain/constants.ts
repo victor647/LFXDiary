@@ -5,7 +5,7 @@ export const SETTINGS_KEY = 'lfx-diary.settings.v1'
 export const DEFAULT_TAG_COLOR = '#8e8e93'
 export const DEFAULT_LAN_NAS_URL = 'https://192.168.0.2:5001/'
 export const DEFAULT_PUBLIC_NAS_URL = 'https://www.lafaxi647.cn:5001/'
-export const DEFAULT_MARKDOWN_FOLDER = '/home/Documents/Diary'
+export const DEFAULT_MARKDOWN_FOLDER = '/Diary'
 export const DEFAULT_GIT_BRANCH = 'main'
 export const DEFAULT_GIT_DIARY_PATH = 'Diary'
 export const MAX_ACTIVITIES_PER_ENTRY = 6
@@ -21,6 +21,18 @@ export const TAG_COLOR_PALETTE = [
   '#f9a8d4',
   '#8e8e93',
 ]
+
+export const DEFAULT_ACTIVITY_COLOR_GROUP_NAMES: Record<string, string> = {
+  '#f97066': 'Red',
+  '#fdb022': 'Orange',
+  '#facc15': 'Yellow',
+  '#4ade80': 'Green',
+  '#7dd3fc': 'Cyan',
+  '#60a5fa': 'Blue',
+  '#c084fc': 'Purple',
+  '#f9a8d4': 'Pink',
+  '#8e8e93': 'Gray',
+}
 
 export const DEFAULT_LOCATION_COLOR = TAG_COLOR_PALETTE[3]
 export const LOCATION_COLOR_PALETTE = TAG_COLOR_PALETTE

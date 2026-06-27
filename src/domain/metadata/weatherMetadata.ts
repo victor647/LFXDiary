@@ -77,8 +77,8 @@ function formatWeatherSamples(entry: DiaryEntry): string {
 
       const city = entry.cities.find((item) => item.id === sample.cityId)
       const cityId = city?.id ?? sample.cityId
-      const aqi = sample.usAqi === null ? 'unknown' : String(sample.usAqi)
-      const relativeHumidity = sample.relativeHumidity === null ? 'unknown' : String(sample.relativeHumidity)
+      const aqi = typeof sample.usAqi === 'number' ? String(sample.usAqi) : 'unknown'
+      const relativeHumidity = typeof sample.relativeHumidity === 'number' ? String(sample.relativeHumidity) : 'unknown'
 
       return `${sample.temperatureC}|${aqi}|${relativeHumidity}|${cityId}`
     })
@@ -121,7 +121,7 @@ function parseWeatherSamples(line: string | undefined, cities: City[]): WeatherS
 }
 
 function parseWeatherSample(sampleText: string, index: number, cities: City[]): WeatherSample | null {
-  const compactMatch = sampleText.match(/^(-?\d+)\|(unknown|\d+)\|(?:(unknown|\d+)\|)?(.+)$/)
+  const compactMatch = sampleText.match(/^(-?\d+)\|(unknown|undefined|\d+)\|(?:(unknown|undefined|\d+)\|)?(.+)$/)
   const config = periodConfig[index]
 
   if (compactMatch && config)
@@ -132,8 +132,10 @@ function parseWeatherSample(sampleText: string, index: number, cities: City[]): 
       weatherText: 'Unknown',
       weatherCode: 0,
       temperatureC: Number(compactMatch[1]),
-      usAqi: compactMatch[2] === 'unknown' ? null : Number(compactMatch[2]),
-      relativeHumidity: compactMatch[3] && compactMatch[3] !== 'unknown' ? Number(compactMatch[3]) : null,
+      usAqi: compactMatch[2] === 'unknown' || compactMatch[2] === 'undefined' ? null : Number(compactMatch[2]),
+      relativeHumidity: compactMatch[3] && compactMatch[3] !== 'unknown' && compactMatch[3] !== 'undefined'
+        ? Number(compactMatch[3])
+        : null,
       fetchedAt: new Date().toISOString(),
       source: 'Markdown',
     }
