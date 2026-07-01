@@ -1,9 +1,10 @@
 import { CloudRain, Droplets, Leaf, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_CITY, periodConfig } from '../../domain/constants'
-import type { DiaryEntry, Period } from '../../domain/types'
+import type { AppSettings, DiaryEntry, Period, WeatherSample } from '../../domain/types'
 import { formatCityDisplayName } from '../../utils/city'
 import { getDailyWeatherFields } from '../../utils/diaryEntryHelpers'
+import { getTemperatureColorBands } from '../../utils/settings'
 import {
   formatAqiForPeriod,
   formatAverageAqiForSamples,
@@ -26,7 +27,7 @@ import { DailyWeatherIcon, WeatherPeriodIcon, WeatherTitleIcon } from '../DiaryI
 
 type WeatherPanelProps = {
   draft: DiaryEntry
-  onUpdateDraft: (patch: Partial<DiaryEntry>) => void
+  settings: AppSettings
   onUpdateDraftIfCurrent: (entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) => void
   onStatusChange: (message: string) => void
   onErrorLog: (log: string) => void
@@ -34,28 +35,29 @@ type WeatherPanelProps = {
 
 export function WeatherPanel({
   draft,
-  onUpdateDraft,
+  settings,
   onUpdateDraftIfCurrent,
   onStatusChange,
   onErrorLog,
 }: WeatherPanelProps) {
-  const [weatherCityByPeriod, setWeatherCityByPeriod] = useState<Record<Period, string>>({
-    morning: draft.cities[0]?.id ?? '',
-    afternoon: draft.cities[0]?.id ?? '',
-    evening: draft.cities[0]?.id ?? '',
-  })
+  const [weatherCityByPeriod, setWeatherCityByPeriod] = useState<Record<Period, string>>(() => getWeatherCityByPeriod(draft))
   const [weatherLocationPickerPeriod, setWeatherLocationPickerPeriod] = useState<Period | null>(null)
   const autoWeatherKeys = useRef<Set<string>>(new Set())
+  const temperatureColorBands = useMemo(
+    () => getTemperatureColorBands(settings.temperatureThresholds),
+    [settings.temperatureThresholds],
+  )
 
   useEffect(() => {
+    const validCityIds = new Set(draft.cities.map((city) => city.id))
     const firstCityId = draft.cities[0]?.id ?? ''
 
-    setWeatherCityByPeriod({
-      morning: draft.weatherSamples.find((sample) => sample.period === 'morning')?.cityId ?? firstCityId,
-      afternoon: draft.weatherSamples.find((sample) => sample.period === 'afternoon')?.cityId ?? firstCityId,
-      evening: draft.weatherSamples.find((sample) => sample.period === 'evening')?.cityId ?? firstCityId,
-    })
-  }, [draft.cities, draft.id, draft.weatherSamples])
+    setWeatherCityByPeriod((current) => ({
+      morning: validCityIds.has(current.morning) ? current.morning : firstCityId,
+      afternoon: validCityIds.has(current.afternoon) ? current.afternoon : firstCityId,
+      evening: validCityIds.has(current.evening) ? current.evening : firstCityId,
+    }))
+  }, [draft.cities])
 
   useEffect(() => {
     const autoKey = draft.id
@@ -90,14 +92,49 @@ export function WeatherPanel({
       })
   }, [draft, onErrorLog, onStatusChange, onUpdateDraftIfCurrent])
 
-  function updateWeatherPeriodCity(period: Period, cityId: string) {
+  async function updateWeatherPeriodCity(period: Period, cityId: string) {
+    const previousWeatherCityByPeriod = weatherCityByPeriod
+    const config = periodConfig.find((item) => item.period === period)
+    const city = draft.cities.find((item) => item.id === cityId)
+
+    setWeatherLocationPickerPeriod(null)
+
+    if (!config || !city)
+      return
+
+    if (weatherCityByPeriod[period] === cityId) {
+      onStatusChange('Weather location unchanged.')
+      return
+    }
+
     setWeatherCityByPeriod({
       ...weatherCityByPeriod,
       [period]: cityId,
     })
-    onUpdateDraft({ weatherSamples: [], dailyWeatherCode: null, dailyWeatherText: 'Not fetched', dailyPrecipitationMm: 0 })
-    setWeatherLocationPickerPeriod(null)
-    onStatusChange('Weather location changed. Fetch weather when ready.')
+    onStatusChange(`Fetching ${config.label.toLowerCase()} weather for ${city.name}...`)
+
+    try {
+      const entryId = draft.id
+      const diaryDate = draft.diaryDate
+      const sample = await fetchWeatherSample(draft.diaryDate, city, config.period, config.sampleTime)
+      const weatherSamples = upsertWeatherSample(draft.weatherSamples, sample)
+
+      onUpdateDraftIfCurrent(entryId, diaryDate, { ...getDailyWeatherFields(weatherSamples), weatherSamples })
+      onStatusChange(`${config.label} weather updated`)
+    } catch (error) {
+      setWeatherCityByPeriod(previousWeatherCityByPeriod)
+      onStatusChange(`${config.label} weather fetch failed. Existing weather data was kept.`)
+      onErrorLog(
+        formatWeatherErrorLog(createWeatherAttemptError(error, config.period, config.label, config.sampleTime, city), {
+          entry: draft,
+          scope: 'manual',
+          period: config.period,
+          sampleTime: config.sampleTime,
+          city,
+          cityByPeriod: previousWeatherCityByPeriod,
+        }),
+      )
+    }
   }
 
   async function fetchWeather() {
@@ -191,7 +228,7 @@ export function WeatherPanel({
             <div
               className="temperature-card"
               key={config.period}
-              style={getTemperatureCardStyle(draft.weatherSamples, config.period)}
+              style={getTemperatureCardStyle(draft.weatherSamples, config.period, temperatureColorBands)}
             >
               <div className="temperature-card-heading">
                 <span>{config.label}</span>
@@ -244,7 +281,9 @@ export function WeatherPanel({
                             key={city.id}
                             type="button"
                             title={city.name}
-                            onClick={() => updateWeatherPeriodCity(config.period, city.id)}
+                            onClick={() => {
+                              void updateWeatherPeriodCity(config.period, city.id)
+                            }}
                           >
                             {formatCityDisplayName(city)}
                           </button>
@@ -292,4 +331,23 @@ function getWeatherAttempt(error: unknown): WeatherAttempt | undefined {
     return undefined
 
   return (error as WeatherAttemptError).weatherAttempt
+}
+
+function getWeatherCityByPeriod(entry: DiaryEntry): Record<Period, string> {
+  const firstCityId = entry.cities[0]?.id ?? ''
+
+  return {
+    morning: entry.weatherSamples.find((sample) => sample.period === 'morning')?.cityId ?? firstCityId,
+    afternoon: entry.weatherSamples.find((sample) => sample.period === 'afternoon')?.cityId ?? firstCityId,
+    evening: entry.weatherSamples.find((sample) => sample.period === 'evening')?.cityId ?? firstCityId,
+  }
+}
+
+function upsertWeatherSample(samples: WeatherSample[], sample: WeatherSample): WeatherSample[] {
+  const nextSamples = samples.filter((item) => item.period !== sample.period)
+  nextSamples.push(sample)
+
+  return periodConfig
+    .map((config) => nextSamples.find((item) => item.period === config.period))
+    .filter((item): item is WeatherSample => Boolean(item))
 }

@@ -47,6 +47,7 @@ export type DiaryEntry = {
   updatedAt: string
   savedAt: string | null
   syncedAt: string | null
+  isEdited: boolean
 }
 
 export type GeocodingResult = {
@@ -77,6 +78,16 @@ export type RecentCity = {
 export type NasConnectionMode = 'lan' | 'public'
 export type SyncProvider = 'nas' | 'git'
 
+export type TemperatureColorBand = {
+  id: string
+  label: string
+  minC: number | null
+  maxC: number | null
+  color: string
+}
+
+export type TemperatureThresholds = Record<string, number>
+
 export type AppSettings = {
   syncProvider: SyncProvider
   nasMode: NasConnectionMode
@@ -94,6 +105,10 @@ export type AppSettings = {
   gitDiaryPath: string
   gitCorsProxy: string
   activityColorGroupNames: Record<string, string>
+  activityTags: Record<string, {
+    color: string
+  }>
+  temperatureThresholds: TemperatureThresholds
 }
 
 export type DiaryCatalog = {

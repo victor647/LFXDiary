@@ -1,9 +1,9 @@
 import { MapPin, Plus, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
-import type { City, DiaryEntry, GeocodingResult } from '../../domain/types'
+import type { City, DiaryEntry } from '../../domain/types'
 import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
-import { formatCityDisplayName, toCity } from '../../utils/city'
+import { formatCityDisplayName, searchCitiesByName } from '../../utils/city'
 import { getRecentCities } from '../../utils/entries'
 import { getLocationNameKey, updateEntryLocations } from '../../utils/diaryEntryHelpers'
 
@@ -82,11 +82,7 @@ export function LocationPanel({
 
     setCityStatus('Searching...')
     try {
-      const response = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=en&format=json`,
-      )
-      const data = (await response.json()) as { results?: GeocodingResult[] }
-      const results = (data.results ?? []).map(toCity)
+      const results = await searchCitiesByName(query)
       setCityResults(results)
 
       if (results.length === 1)

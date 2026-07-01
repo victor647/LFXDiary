@@ -1,5 +1,19 @@
 import type { City, GeocodingResult } from '../domain/types'
 
+export async function searchCitiesByName(query: string, count = 8): Promise<City[]> {
+  const trimmed = query.trim()
+
+  if (!trimmed)
+    return []
+
+  const response = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(trimmed)}&count=${count}&language=en&format=json`,
+  )
+  const data = (await response.json()) as { results?: GeocodingResult[] }
+
+  return (data.results ?? []).map(toCity)
+}
+
 export function toCity(result: GeocodingResult): City {
   const nameParts = [result.name, result.admin1].filter(Boolean)
   const name = Array.from(new Set(nameParts)).join(', ')

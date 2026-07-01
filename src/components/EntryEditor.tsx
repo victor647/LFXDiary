@@ -1,10 +1,11 @@
 type EntryEditorProps = {
   content: string
+  saveLabel: string
   onContentChange: (content: string) => void
   onSave: () => void
 }
 
-export function EntryEditor({ content, onContentChange, onSave }: EntryEditorProps) {
+export function EntryEditor({ content, saveLabel, onContentChange, onSave }: EntryEditorProps) {
   return (
     <section className="entry-body">
       <label>Entry</label>
@@ -14,7 +15,7 @@ export function EntryEditor({ content, onContentChange, onSave }: EntryEditorPro
         placeholder="Write today's journal in English..."
       />
       <button className="entry-save-button" type="button" onClick={onSave}>
-        Save
+        {saveLabel}
       </button>
     </section>
   )

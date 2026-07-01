@@ -1,6 +1,7 @@
 import { periodConfig, weatherCodeText } from '../domain/constants'
-import type { City, Period, WeatherSample } from '../domain/types'
+import type { City, Period, TemperatureColorBand, WeatherSample } from '../domain/types'
 import { formatCityDisplayName } from './city'
+import { getTagBackgroundColor } from './colors'
 
 export async function fetchWeatherSample(
   date: string,
@@ -219,17 +220,17 @@ export function formatHumidityForPeriod(samples: WeatherSample[], period: Period
   return showPercent ? `${sample.relativeHumidity}%` : String(sample.relativeHumidity)
 }
 
-export function getTemperatureCardStyle(samples: WeatherSample[], period: Period) {
+export function getTemperatureCardStyle(samples: WeatherSample[], period: Period, temperatureColorBands: TemperatureColorBand[]) {
   const sample = samples.find((item) => item.period === period)
 
   if (!sample)
     return undefined
 
-  const colors = getTemperatureColors(sample.temperatureC)
+  const color = getTemperatureColor(sample.temperatureC, temperatureColorBands)
 
   return {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
+    backgroundColor: getTagBackgroundColor(color),
+    borderColor: color,
   }
 }
 
@@ -277,20 +278,15 @@ export function getDailyHumidityStyle(samples: WeatherSample[]) {
   }
 }
 
-function getTemperatureColors(temperatureC: number) {
-  if (temperatureC < 0)
-    return { background: '#e6efff', border: '#2563eb' }
+function getTemperatureColor(temperatureC: number, temperatureColorBands: TemperatureColorBand[]): string {
+  const band = temperatureColorBands.find((item) => {
+    const isAboveMin = item.minC === null || temperatureC >= item.minC
+    const isBelowMax = item.maxC === null || temperatureC < item.maxC
 
-  if (temperatureC < 10)
-    return { background: '#eef8ff', border: '#60a5fa' }
+    return isAboveMin && isBelowMax
+  })
 
-  if (temperatureC < 20)
-    return { background: '#effaf1', border: '#4ade80' }
-
-  if (temperatureC < 30)
-    return { background: '#fff8db', border: '#facc15' }
-
-  return { background: '#fff0f0', border: '#f87171' }
+  return band?.color ?? '#8e8e93'
 }
 
 function getAqiColor(aqi: number): string {

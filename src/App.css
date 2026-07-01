@@ -49,6 +49,10 @@
   color: var(--muted);
 }
 
+.sidebar-file-input {
+  display: none;
+}
+
 .settings-button.selected {
   border-color: #1d3557;
   color: #1d3557;
@@ -238,7 +242,7 @@ label {
   text-align: left;
 }
 
-.entry-item.pending {
+.entry-item.unsynced {
   border-style: dashed;
 }
 
@@ -260,6 +264,10 @@ label {
   font-weight: 700;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+.entry-item.unsaved .entry-date {
+  color: var(--muted);
 }
 
 .entry-word-count {
@@ -379,10 +387,19 @@ label {
 
 .settings-page {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.settings-body {
+  display: grid;
   align-content: start;
   gap: 10px;
   min-height: 0;
-  padding: 8px;
   overflow: auto;
 }
 
@@ -495,7 +512,7 @@ label {
 
 .tag-manager-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 24px 28px 28px;
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
   gap: 6px;
   align-items: center;
   min-width: 0;
@@ -503,6 +520,16 @@ label {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fbfcfd;
+}
+
+.tag-manager-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-manager-row input {
@@ -568,8 +595,7 @@ label {
   background: #fbfcfd;
 }
 
-.activity-manager-group-header,
-.activity-manager-tag-row {
+.activity-manager-group-header {
   display: grid;
   gap: 6px;
   align-items: center;
@@ -580,23 +606,65 @@ label {
   grid-template-columns: 28px 16px minmax(0, 1fr) 28px;
 }
 
-.activity-manager-tag-row {
-  grid-template-columns: minmax(0, 1fr) 24px minmax(96px, 128px) 28px 28px;
-}
-
-.activity-manager-group-header input,
-.activity-manager-tag-row input,
-.activity-manager-tag-row select {
+.activity-manager-group-header input {
   min-width: 0;
   height: 28px;
   padding: 0 8px;
   font-size: 12px;
 }
 
-.activity-manager-tags {
-  display: grid;
+.activity-manager-chip-list {
+  display: flex;
+  flex-wrap: wrap;
   gap: 5px;
   padding-left: 34px;
+}
+
+.temperature-settings-list {
+  display: grid;
+  gap: 6px;
+}
+
+.temperature-settings-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 44px minmax(96px, 118px);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.temperature-settings-preview {
+  display: block;
+  height: 26px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.temperature-threshold-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.temperature-threshold-input input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.temperature-threshold-tail {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .settings-actions {
@@ -622,9 +690,9 @@ label {
 .metadata-deck {
   display: grid;
   grid-template-columns:
-    minmax(210px, 0.9fr)
+    minmax(180px, 0.65fr)
     minmax(132px, 0.42fr)
-    minmax(138px, 0.42fr)
+    minmax(162px, 0.62fr)
     minmax(360px, 1.36fr)
     minmax(340px, 1.08fr);
   grid-template-areas: 'date location activities weather mood';
@@ -663,7 +731,11 @@ label {
   align-items: flex-start;
 }
 
-.activity-chips button {
+.activity-chips button,
+.activity-manager-chip-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   max-width: 112px;
   min-height: 26px;
   padding: 0 9px;
@@ -674,7 +746,26 @@ label {
   white-space: nowrap;
 }
 
-.activity-chips .activity-add-toggle {
+.activity-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-chip-count {
+  min-width: 14px;
+  padding-left: 5px;
+  border-left: 1px solid currentColor;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0.68;
+  text-align: right;
+}
+
+.activity-chips .activity-add-toggle,
+.activity-manager-chip-list .activity-add-toggle {
+  justify-content: center;
   width: 28px;
   flex: 0 0 28px;
   max-width: 28px;
@@ -762,6 +853,13 @@ label {
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
+.activity-color-options .activity-add-toggle {
+  justify-content: center;
+  border-style: dashed;
+  background: #ffffff;
+  color: var(--muted);
+}
+
 .activity-recent-popover .activity-other-option {
   border-style: dashed;
   background: #ffffff;
@@ -825,7 +923,7 @@ label {
 .date-stepper {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px 34px;
+  grid-template-columns: minmax(0, 1fr) 40px 30px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -858,9 +956,11 @@ label {
 
 .date-display-input {
   min-height: 32px;
+  padding: 0 8px;
   border: 0;
   border-radius: 0;
   color: var(--text-strong);
+  font-size: 12px;
   font-weight: 650;
   cursor: pointer;
 }
@@ -970,7 +1070,8 @@ label {
 .activity-dialog,
 .delete-entry-dialog,
 .force-push-dialog,
-.sync-error-dialog {
+.sync-error-dialog,
+.pull-conflict-dialog {
   display: grid;
   width: min(420px, calc(100vw - 32px));
   gap: 10px;
@@ -985,12 +1086,97 @@ label {
   width: min(720px, calc(100vw - 32px));
 }
 
+.pull-conflict-dialog {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
 .delete-entry-dialog p,
-.force-push-dialog p {
+.force-push-dialog p,
+.pull-conflict-dialog p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.pull-conflict-dialog h2 {
+  margin: 0 0 4px;
+  color: var(--text-strong);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.pull-conflict-meta {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pull-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+}
+
+.pull-diff-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.pull-diff-pane h3 {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.pull-diff-lines {
+  min-height: 260px;
+  overflow: auto;
+  padding: 8px 0;
+  background: #fbfcfd;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pull-diff-line {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 18px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pull-diff-line.added {
+  background: #ecfdf3;
+}
+
+.pull-diff-line.removed {
+  background: #fff1f2;
+}
+
+.pull-diff-line.empty {
+  background: #f8fafc;
+  color: transparent;
+}
+
+.pull-diff-line-number {
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
 }
 
 .sync-error-dialog pre {
@@ -1453,9 +1639,9 @@ label {
 @media (max-width: 1500px) {
   .metadata-deck {
     grid-template-columns:
-      minmax(210px, 1fr)
+      minmax(180px, 0.8fr)
       minmax(132px, max-content)
-      minmax(138px, max-content)
+      minmax(162px, max-content)
       minmax(0, 1fr)
       minmax(340px, max-content);
     grid-template-areas:
@@ -1468,7 +1654,7 @@ label {
   .metadata-deck {
     grid-template-columns:
       minmax(132px, max-content)
-      minmax(138px, max-content)
+      minmax(162px, max-content)
       repeat(3, minmax(0, 1fr));
     grid-template-areas:
       'date date date date date'
@@ -1515,6 +1701,10 @@ label {
   }
 
   .tag-manager-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pull-diff-grid {
     grid-template-columns: 1fr;
   }
 }

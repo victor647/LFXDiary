@@ -2,15 +2,18 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FileUp,
   FilePlus2,
   Settings,
   Search,
   Trash2,
   Upload,
 } from 'lucide-react'
+import { useRef } from 'react'
 import type { DiaryEntry, NotebookGroup } from '../domain/types'
 import { getMoodBackgroundColor } from '../utils/colors'
 import { formatDiaryDate } from '../utils/date'
+import { isEntryUnsynced } from '../utils/diaryEntryHelpers'
 import { DiaryWeatherIcon, EntryTagDots } from './DiaryIcons'
 
 type SidebarContextMenu = {
@@ -29,10 +32,12 @@ type SidebarProps = {
   expandedYears: Set<string>
   expandedMonths: Set<string>
   isDraftDirty: boolean
+  unsavedEntryIds: Set<string>
   contextMenu: SidebarContextMenu | null
   statusMessage: string
   isSettingsOpen: boolean
   onNewEntry: () => void
+  onImportEvernoteFile: (file: File) => void
   onSync: () => void
   onPull: () => void
   onOpenSettings: () => void
@@ -57,10 +62,12 @@ export function Sidebar({
   expandedYears,
   expandedMonths,
   isDraftDirty,
+  unsavedEntryIds,
   contextMenu,
   statusMessage,
   isSettingsOpen,
   onNewEntry,
+  onImportEvernoteFile,
   onSync,
   onPull,
   onOpenSettings,
@@ -74,6 +81,8 @@ export function Sidebar({
   onExportEntry,
   onDeleteEntry,
 }: SidebarProps) {
+  const importInputRef = useRef<HTMLInputElement>(null)
+
   return (
     <aside className="sidebar">
       <div className="brand compact-brand">
@@ -84,6 +93,29 @@ export function Sidebar({
           <button className="sidebar-icon-button" type="button" onClick={onNewEntry} title="New entry">
             <FilePlus2 size={17} />
           </button>
+          <button
+            className="sidebar-icon-button"
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            title="Import Evernote export"
+          >
+            <FileUp size={17} />
+          </button>
+          <input
+            ref={importInputRef}
+            className="sidebar-file-input"
+            type="file"
+            accept=".html,.htm,.notes,.enex,text/html,text/xml,application/xml"
+            aria-label="Import Evernote export"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+
+              if (file)
+                onImportEvernoteFile(file)
+
+              event.target.value = ''
+            }}
+          />
           <button
             className={isSettingsOpen ? 'settings-button selected' : 'settings-button'}
             type="button"
@@ -140,10 +172,10 @@ export function Sidebar({
                         (!selectedNotebook || selectedNotebook === month.key) &&
                         month.entries.map((entry) => (
                           <button
-                            className={getEntryItemClassName(entry, draftId, isDraftDirty)}
+                            className={getEntryItemClassName(entry, draftId, isDraftDirty, unsavedEntryIds)}
                             key={entry.id}
                             type="button"
-                            title={getEntryItemTitle(entry, draftId, isDraftDirty)}
+                            title={getEntryItemTitle(entry, draftId, isDraftDirty, unsavedEntryIds)}
                             style={{ backgroundColor: getMoodBackgroundColor(entry.mood) }}
                             onContextMenu={(event) => {
                               event.preventDefault()
@@ -202,30 +234,54 @@ export function Sidebar({
   )
 }
 
-function getEntryItemClassName(entry: DiaryEntry, draftId: string, isDraftDirty: boolean): string {
+function getEntryItemClassName(
+  entry: DiaryEntry,
+  draftId: string,
+  isDraftDirty: boolean,
+  unsavedEntryIds: Set<string>,
+): string {
   const classNames = ['entry-item']
 
   if (entry.id === draftId)
     classNames.push('selected')
 
-  if (isEntryPending(entry, draftId, isDraftDirty))
-    classNames.push('pending')
+  if (isEntryUnsaved(entry, draftId, isDraftDirty, unsavedEntryIds))
+    classNames.push('unsaved')
+
+  if (isEntryUnsynced(entry))
+    classNames.push('unsynced')
 
   return classNames.join(' ')
 }
 
-function getEntryItemTitle(entry: DiaryEntry, draftId: string, isDraftDirty: boolean): string {
-  if (entry.id === draftId && isDraftDirty)
+function getEntryItemTitle(
+  entry: DiaryEntry,
+  draftId: string,
+  isDraftDirty: boolean,
+  unsavedEntryIds: Set<string>,
+): string {
+  const isUnsaved = isEntryUnsaved(entry, draftId, isDraftDirty, unsavedEntryIds)
+  const isUnsynced = isEntryUnsynced(entry)
+
+  if (isUnsaved && isUnsynced)
+    return 'Unsaved local changes; saved version is not pushed'
+
+  if (isUnsaved)
     return 'Unsaved local changes'
 
-  if (!entry.syncedAt || entry.syncedAt < entry.updatedAt)
-    return 'Not synced to NAS'
+  if (isUnsynced)
+    return 'Not pushed'
 
-  return 'Synced to NAS'
+  return 'Synced'
 }
 
-function isEntryPending(entry: DiaryEntry, draftId: string, isDraftDirty: boolean): boolean {
-  return (entry.id === draftId && isDraftDirty) || !entry.syncedAt || entry.syncedAt < entry.updatedAt
+function isEntryUnsaved(
+  entry: DiaryEntry,
+  draftId: string,
+  isDraftDirty: boolean,
+  unsavedEntryIds: Set<string>,
+): boolean {
+  return unsavedEntryIds.has(entry.id) || (entry.id === draftId && isDraftDirty)
 }
 
 function formatWordCount(content: string): string {

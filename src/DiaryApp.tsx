@@ -3,6 +3,7 @@ import { DeleteEntryDialog } from './components/DeleteEntryDialog'
 import { EntryEditor } from './components/EntryEditor'
 import { ForcePushDialog } from './components/ForcePushDialog'
 import { MetadataEditor } from './components/MetadataEditor'
+import { PullConflictDialog } from './components/PullConflictDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { SyncErrorDialog } from './components/SyncErrorDialog'
@@ -24,6 +25,7 @@ import {
   normalizeLocationColors,
   upsertEntry,
 } from './utils/entries'
+import { createDiaryEntryFromEvernoteImport, parseEvernoteImportFile } from './utils/evernoteImport'
 import {
   downloadTextFile,
   getEntryMarkdownFileName,
@@ -44,6 +46,19 @@ import {
 } from './utils/synology'
 import { normalizeTagColors, normalizeTags } from './utils/tags'
 
+type PullConflict = {
+  localEntry: DiaryEntry
+  cloudEntry: DiaryEntry
+}
+
+type PendingPullReview = {
+  syncTarget: string
+  baseEntries: DiaryEntry[]
+  resolvedEntries: DiaryEntry[]
+  conflicts: PullConflict[]
+  index: number
+}
+
 export function DiaryApp() {
   const [currentPage, setCurrentPage] = useState<'diary' | 'settings'>('diary')
   const [settings, setSettings] = useState(loadSettings)
@@ -60,6 +75,7 @@ export function DiaryApp() {
   } | null>(null)
   const [pendingDeleteEntry, setPendingDeleteEntry] = useState<DiaryEntry | null>(null)
   const [pendingForcePushMonth, setPendingForcePushMonth] = useState<string | null>(null)
+  const [pendingPullReview, setPendingPullReview] = useState<PendingPullReview | null>(null)
   const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([String(new Date().getFullYear())]))
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set([getNotebookKey(toDateInputValue(new Date()))]))
 
@@ -98,12 +114,17 @@ export function DiaryApp() {
   const notebookGroups = useMemo(() => groupEntriesByNotebook(searchResults), [searchResults])
   const draftSavedEntry = useMemo(() => entries.find((entry) => entry.id === draft.id), [draft.id, entries])
   const isDraftDirty = !draftSavedEntry || draftSavedEntry.updatedAt !== draft.updatedAt
+  const editedEntryCount = useMemo(() => getEditedEntryCount(entries, draft), [draft, entries])
+  const unsavedEntryIds = useMemo(() => getUnsavedEntryIds(entries, draft), [draft, entries])
+  const unuploadedEntryCount = useMemo(() => getUnuploadedEntryCount(entries, draft), [draft, entries])
+  const sidebarStatusMessage = getSidebarStatusMessage(unsavedEntryIds.size, unuploadedEntryCount) ?? statusMessage
 
   function updateDraft(patch: Partial<DiaryEntry>) {
     setDraft((current) => ({
       ...current,
       ...patch,
       updatedAt: new Date().toISOString(),
+      isEdited: true,
     }))
   }
 
@@ -116,40 +137,158 @@ export function DiaryApp() {
         ...current,
         ...patch,
         updatedAt: new Date().toISOString(),
+        isEdited: true,
       }
     })
   }
 
-  function saveDraft() {
+  function saveEditedEntries() {
     const now = new Date().toISOString()
-    const normalizedTags = normalizeTags(draft.tags)
-    const normalizedCities = normalizeLocationColors(draft.locationColors, draft.cities)
-    const normalizedDraft = {
-      ...draft,
-      tags: normalizedTags,
-      ...getNormalizedDailyWeatherFields(draft),
-      tagColors: normalizeTagColors(draft.tagColors, normalizedTags),
-      locationColors: normalizedCities,
-      updatedAt: now,
-      savedAt: now,
-      syncedAt: null,
+    const savedEntries = new Map<string, DiaryEntry>()
+    let savedCount = 0
+
+    for (const entry of entries) {
+      const savedEntry = entry.isEdited ? getSavedDraftEntry(entry, now) : entry
+      savedEntries.set(savedEntry.id, savedEntry)
+
+      if (entry.isEdited)
+        savedCount += 1
     }
 
+    const shouldSaveDraft = isDraftDirty || draft.isEdited || !savedEntries.has(draft.id)
+    const normalizedDraft = shouldSaveDraft ? getSavedDraftEntry(draft, now) : draft
+
+    if (shouldSaveDraft) {
+      if (!savedEntries.get(draft.id)?.isEdited)
+        savedCount += 1
+
+      savedEntries.set(normalizedDraft.id, normalizedDraft)
+    }
+
+    const nextEntries = Array.from(savedEntries.values())
+
     setDraft(normalizedDraft)
-    setEntries((current) => upsertEntry(current, normalizedDraft))
+    setEntries(nextEntries)
     setSelectedNotebook(getNotebookKey(normalizedDraft.diaryDate))
     setExpandedYears((current) => new Set([...current, getNotebookYear(normalizedDraft.diaryDate)]))
     setExpandedMonths((current) => new Set([...current, getNotebookKey(normalizedDraft.diaryDate)]))
-    setStatusMessage(`Saved locally: ${formatDiaryDate(normalizedDraft.diaryDate)}. Click Push to upload.`)
+    setStatusMessage(
+      savedCount > 1
+        ? `Saved ${savedCount} edited entries locally. Click Push to upload.`
+        : `Saved locally: ${formatDiaryDate(normalizedDraft.diaryDate)}. Click Push to upload.`,
+    )
+  }
+
+  function getNavigationSaveState(): { savedDraft: DiaryEntry, localEntries: DiaryEntry[], didSave: boolean } {
+    if (!isDraftDirty)
+      return { savedDraft: draft, localEntries: entries, didSave: false }
+
+    const savedDraft = getSavedDraftEntry(draft, new Date().toISOString())
+
+    return {
+      savedDraft,
+      localEntries: upsertEntry(entries, savedDraft),
+      didSave: true,
+    }
   }
 
   function startNewEntry() {
+    const { savedDraft, localEntries, didSave } = getNavigationSaveState()
     const next = makeBlankEntry()
+    if (didSave)
+      setEntries(localEntries)
     setDraft(next)
     setSelectedNotebook(getNotebookKey(next.diaryDate))
     setExpandedYears((current) => new Set([...current, getNotebookYear(next.diaryDate)]))
     setExpandedMonths((current) => new Set([...current, getNotebookKey(next.diaryDate)]))
-    setStatusMessage('New entry')
+    setStatusMessage(didSave ? `Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. New entry` : 'New entry')
+  }
+
+  function selectEntry(entry: DiaryEntry, notebookKey: string) {
+    setSelectedNotebook(notebookKey)
+
+    if (draft.id === entry.id)
+      return
+
+    const { savedDraft, localEntries, didSave } = getNavigationSaveState()
+    const nextEntry = localEntries.find((item) => item.id === entry.id) ?? entry
+
+    if (didSave)
+      setEntries(localEntries)
+
+    setDraft(nextEntry)
+
+    if (didSave)
+      setStatusMessage(`Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. Opened ${formatDiaryDate(nextEntry.diaryDate)}.`)
+  }
+
+  async function importEvernoteFile(file: File) {
+    try {
+      setStatusMessage(`Importing ${file.name}...`)
+      const text = await file.text()
+      const parsedFile = parseEvernoteImportFile(text, file.name)
+
+      if (!parsedFile.drafts.length) {
+        setStatusMessage(getEmptyImportStatusMessage(file.name, parsedFile.encryptedCount, parsedFile.unsupportedCount))
+        return
+      }
+
+      let nextEntries = entries
+      let nextSettings = settings
+      const importedEntries: DiaryEntry[] = []
+      const addedTags = new Set<string>()
+      let weatherFailureCount = 0
+
+      for (const importDraft of parsedFile.drafts) {
+        const result = await createDiaryEntryFromEvernoteImport(importDraft, nextEntries, nextSettings)
+
+        nextEntries = upsertEntry(nextEntries, result.entry)
+        nextSettings = result.settings
+        importedEntries.push(result.entry)
+
+        for (const tag of result.addedTags)
+          addedTags.add(tag)
+
+        if (!result.weatherFetched)
+          weatherFailureCount += 1
+      }
+
+      const newestImportedEntry = [...importedEntries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
+
+      setSettings(nextSettings)
+      saveSettings(nextSettings)
+      setEntries(nextEntries)
+      setDraft(newestImportedEntry)
+      setSelectedNotebook(getNotebookKey(newestImportedEntry.diaryDate))
+      setExpandedYears((current) => {
+        const next = new Set(current)
+
+        for (const entry of importedEntries)
+          next.add(getNotebookYear(entry.diaryDate))
+
+        return next
+      })
+      setExpandedMonths((current) => {
+        const next = new Set(current)
+
+        for (const entry of importedEntries)
+          next.add(getNotebookKey(entry.diaryDate))
+
+        return next
+      })
+      setStatusMessage(
+        getImportStatusMessage(
+          file.name,
+          importedEntries.length,
+          Array.from(addedTags),
+          weatherFailureCount,
+          parsedFile.encryptedCount,
+          parsedFile.unsupportedCount,
+        ),
+      )
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Evernote import failed.')
+    }
   }
 
   function toggleYear(year: string) {
@@ -185,18 +324,7 @@ export function DiaryApp() {
     let localEntries = entries
 
     if (isDraftDirty) {
-      const normalizedTags = normalizeTags(draft.tags)
-      const normalizedCities = normalizeLocationColors(draft.locationColors, draft.cities)
-      normalizedDraft = {
-        ...draft,
-        tags: normalizedTags,
-        ...getNormalizedDailyWeatherFields(draft),
-        tagColors: normalizeTagColors(draft.tagColors, normalizedTags),
-        locationColors: normalizedCities,
-        updatedAt: now,
-        savedAt: now,
-        syncedAt: null,
-      }
+      normalizedDraft = getSavedDraftEntry(draft, now)
       localEntries = upsertEntry(entries, normalizedDraft)
       setDraft(normalizedDraft)
       setEntries(localEntries)
@@ -239,7 +367,7 @@ export function DiaryApp() {
         await uploadEntriesToSynology(entriesToPush, normalizedSettings, localEntries)
 
       const syncedAt = new Date().toISOString()
-      const pushedEntries = entriesToPush.map((entry) => ({ ...entry, syncedAt }))
+      const pushedEntries = entriesToPush.map((entry) => ({ ...entry, syncedAt, isEdited: false }))
       const pushedDraft = pushedEntries.find((entry) => entry.id === normalizedDraft.id) ?? normalizedDraft
       const destination =
         normalizedSettings.syncProvider === 'git'
@@ -275,6 +403,15 @@ export function DiaryApp() {
     try {
       const normalizedSettings = normalizeSettings(settings)
       const syncTarget = normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'
+      let localEntries = entries
+
+      if (isDraftDirty) {
+        const savedDraft = getSavedDraftEntry(draft, new Date().toISOString())
+        localEntries = upsertEntry(entries, savedDraft)
+        setDraft(savedDraft)
+        setEntries(localEntries)
+      }
+
       setStatusMessage(`Pulling Markdown entries from ${syncTarget}...`)
       const pulledEntries =
         normalizedSettings.syncProvider === 'git'
@@ -291,35 +428,92 @@ export function DiaryApp() {
       }
 
       const pulledAt = new Date().toISOString()
-      const syncedPulledEntries = pulledEntries.map((entry) => ({ ...entry, syncedAt: pulledAt }))
-      const nextEntries = mergePulledEntries(entries, syncedPulledEntries)
-      const newestPulledEntry = [...syncedPulledEntries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
+      const syncedPulledEntries = pulledEntries.map((entry) => ({ ...entry, syncedAt: pulledAt, isEdited: false }))
+      const conflicts = getPullConflicts(localEntries, syncedPulledEntries)
 
-      setEntries(nextEntries)
-      setDraft(newestPulledEntry)
-      setSelectedNotebook(getNotebookKey(newestPulledEntry.diaryDate))
-      setExpandedYears((current) => {
-        const next = new Set(current)
+      if (conflicts.length) {
+        const conflictDates = new Set(conflicts.map((conflict) => conflict.cloudEntry.diaryDate))
+        setPendingPullReview({
+          syncTarget,
+          baseEntries: localEntries,
+          resolvedEntries: syncedPulledEntries.filter((entry) => !conflictDates.has(entry.diaryDate)),
+          conflicts,
+          index: 0,
+        })
+        setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${syncTarget}.`)
+        return
+      }
 
-        for (const entry of syncedPulledEntries)
-          next.add(getNotebookYear(entry.diaryDate))
-
-        return next
-      })
-      setExpandedMonths((current) => {
-        const next = new Set(current)
-
-        for (const entry of syncedPulledEntries)
-          next.add(getNotebookKey(entry.diaryDate))
-
-        return next
-      })
-      setStatusMessage(`Pulled ${syncedPulledEntries.length} Markdown ${syncedPulledEntries.length === 1 ? 'entry' : 'entries'} from ${syncTarget}`)
+      finishPulledEntries(syncedPulledEntries, syncTarget, localEntries)
     } catch (error) {
       const normalizedSettings = normalizeSettings(settings)
       setStatusMessage(error instanceof Error ? error.message : `${normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'} pull failed.`)
       setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings))
     }
+  }
+
+  function finishPulledEntries(
+    pulledEntries: DiaryEntry[],
+    syncTarget: string,
+    baseEntries: DiaryEntry[],
+    resolvedConflictCount = 0,
+  ) {
+    const nextEntries = mergePulledEntries(baseEntries, pulledEntries)
+    const newestPulledEntry = [...pulledEntries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
+
+    setEntries(nextEntries)
+    setDraft(newestPulledEntry)
+    setSelectedNotebook(getNotebookKey(newestPulledEntry.diaryDate))
+    setExpandedYears((current) => {
+      const next = new Set(current)
+
+      for (const entry of pulledEntries)
+        next.add(getNotebookYear(entry.diaryDate))
+
+      return next
+    })
+    setExpandedMonths((current) => {
+      const next = new Set(current)
+
+      for (const entry of pulledEntries)
+        next.add(getNotebookKey(entry.diaryDate))
+
+      return next
+    })
+
+    const conflictText = resolvedConflictCount
+      ? ` Resolved ${resolvedConflictCount} ${resolvedConflictCount === 1 ? 'conflict' : 'conflicts'}.`
+      : ''
+    setStatusMessage(
+      `Pulled ${pulledEntries.length} Markdown ${pulledEntries.length === 1 ? 'entry' : 'entries'} from ${syncTarget}.${conflictText}`,
+    )
+  }
+
+  function resolvePullConflict(useCloudEntry: boolean) {
+    if (!pendingPullReview)
+      return
+
+    const conflict = pendingPullReview.conflicts[pendingPullReview.index]
+    const selectedEntry = useCloudEntry ? conflict.cloudEntry : conflict.localEntry
+    const resolvedEntries = [...pendingPullReview.resolvedEntries, selectedEntry]
+    const nextIndex = pendingPullReview.index + 1
+
+    if (nextIndex < pendingPullReview.conflicts.length) {
+      setPendingPullReview({
+        ...pendingPullReview,
+        resolvedEntries,
+        index: nextIndex,
+      })
+      return
+    }
+
+    setPendingPullReview(null)
+    finishPulledEntries(
+      resolvedEntries,
+      pendingPullReview.syncTarget,
+      pendingPullReview.baseEntries,
+      pendingPullReview.conflicts.length,
+    )
   }
 
   function exportEntry(entry: DiaryEntry) {
@@ -399,19 +593,20 @@ export function DiaryApp() {
         expandedYears={expandedYears}
         expandedMonths={expandedMonths}
         isDraftDirty={isDraftDirty}
+        unsavedEntryIds={unsavedEntryIds}
         contextMenu={contextMenu}
-        statusMessage={statusMessage}
+        statusMessage={sidebarStatusMessage}
         isSettingsOpen={currentPage === 'settings'}
         onNewEntry={startNewEntry}
+        onImportEvernoteFile={(file) => {
+          void importEvernoteFile(file)
+        }}
         onSync={pushCurrentMonthEntries}
         onPull={pullEntriesFromNas}
         onOpenSettings={() => setCurrentPage('settings')}
         onSearchChange={setSearchQuery}
         onSelectNotebook={setSelectedNotebook}
-        onSelectEntry={(entry, notebookKey) => {
-          setDraft(entry)
-          setSelectedNotebook(notebookKey)
-        }}
+        onSelectEntry={selectEntry}
         onToggleYear={toggleYear}
         onToggleMonth={toggleMonth}
         onOpenContextMenu={setContextMenu}
@@ -439,6 +634,7 @@ export function DiaryApp() {
               draft={draft}
               entries={entries}
               settings={settings}
+              onSettingsChange={setSettings}
               onUpdateDraft={updateDraft}
               onUpdateDraftIfCurrent={updateDraftIfCurrent}
               onDraftChange={setDraft}
@@ -450,7 +646,8 @@ export function DiaryApp() {
             <EntryEditor
               content={draft.content}
               onContentChange={(content) => updateDraft({ content })}
-              onSave={saveDraft}
+              saveLabel={editedEntryCount > 1 ? 'Save All' : 'Save'}
+              onSave={saveEditedEntries}
             />
           </>
         )}
@@ -479,7 +676,123 @@ export function DiaryApp() {
           }}
         />
       )}
+      {pendingPullReview && (
+        <PullConflictDialog
+          localEntry={pendingPullReview.conflicts[pendingPullReview.index].localEntry}
+          cloudEntry={pendingPullReview.conflicts[pendingPullReview.index].cloudEntry}
+          conflictIndex={pendingPullReview.index}
+          conflictCount={pendingPullReview.conflicts.length}
+          onCancel={() => {
+            setPendingPullReview(null)
+            setStatusMessage('Pull canceled.')
+          }}
+          onUseLocal={() => resolvePullConflict(false)}
+          onUseCloud={() => resolvePullConflict(true)}
+        />
+      )}
       {syncErrorLog && <SyncErrorDialog log={syncErrorLog} onClose={() => setSyncErrorLog(null)} />}
     </main>
   )
+}
+
+function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
+  const normalizedTags = normalizeTags(entry.tags)
+  const normalizedCities = normalizeLocationColors(entry.locationColors, entry.cities)
+
+  return {
+    ...entry,
+    tags: normalizedTags,
+    ...getNormalizedDailyWeatherFields(entry),
+    tagColors: normalizeTagColors(entry.tagColors, normalizedTags),
+    locationColors: normalizedCities,
+    updatedAt: savedAt,
+    savedAt,
+    syncedAt: null,
+    isEdited: true,
+  }
+}
+
+function getEditedEntryCount(entries: DiaryEntry[], draft: DiaryEntry): number {
+  const editedEntryIds = new Set(entries.filter(isEntryUnsynced).map((entry) => entry.id))
+
+  if (draft.isEdited || !entries.some((entry) => entry.id === draft.id && entry.updatedAt === draft.updatedAt))
+    editedEntryIds.add(draft.id)
+
+  return editedEntryIds.size
+}
+
+function getUnsavedEntryIds(entries: DiaryEntry[], draft: DiaryEntry): Set<string> {
+  return new Set(getEntriesWithDraft(entries, draft).filter(isEntryUnsaved).map((entry) => entry.id))
+}
+
+function getUnuploadedEntryCount(entries: DiaryEntry[], draft: DiaryEntry): number {
+  return getEntriesWithDraft(entries, draft).filter(isEntryUnsynced).length
+}
+
+function getEntriesWithDraft(entries: DiaryEntry[], draft: DiaryEntry): DiaryEntry[] {
+  const entriesById = new Map(entries.map((entry) => [entry.id, entry]))
+  entriesById.set(draft.id, draft)
+  return Array.from(entriesById.values())
+}
+
+function isEntryUnsaved(entry: DiaryEntry): boolean {
+  return !entry.savedAt || entry.savedAt < entry.updatedAt
+}
+
+function getSidebarStatusMessage(unsavedCount: number, unuploadedCount: number): string | null {
+  if (!unsavedCount && !unuploadedCount)
+    return null
+
+  return `Unsaved ${unsavedCount} · Unuploaded ${unuploadedCount}`
+}
+
+function getPullConflicts(localEntries: DiaryEntry[], cloudEntries: DiaryEntry[]): PullConflict[] {
+  const localEntriesByDate = new Map(localEntries.map((entry) => [entry.diaryDate, entry]))
+
+  return cloudEntries
+    .map((cloudEntry) => {
+      const localEntry = localEntriesByDate.get(cloudEntry.diaryDate)
+
+      if (!localEntry || normalizeBodyText(localEntry.content) === normalizeBodyText(cloudEntry.content))
+        return null
+
+      return {
+        localEntry,
+        cloudEntry,
+      }
+    })
+    .filter((conflict): conflict is PullConflict => Boolean(conflict))
+}
+
+function normalizeBodyText(content: string): string {
+  return content.replace(/\r\n/g, '\n')
+}
+
+function getImportStatusMessage(
+  fileName: string,
+  importedCount: number,
+  addedTags: string[],
+  weatherFailureCount: number,
+  encryptedCount: number,
+  unsupportedCount: number,
+): string {
+  const detailParts = [
+    addedTags.length ? `Added ${addedTags.length} activity ${addedTags.length === 1 ? 'tag' : 'tags'}` : '',
+    weatherFailureCount ? `${weatherFailureCount} weather ${weatherFailureCount === 1 ? 'fetch' : 'fetches'} failed` : '',
+    encryptedCount ? `Skipped ${encryptedCount} encrypted ${encryptedCount === 1 ? 'note' : 'notes'}` : '',
+    unsupportedCount ? `Skipped ${unsupportedCount} unsupported ${unsupportedCount === 1 ? 'note' : 'notes'}` : '',
+  ].filter(Boolean)
+  const details = detailParts.length ? ` ${detailParts.join('. ')}.` : ''
+
+  return `Imported ${importedCount} ${importedCount === 1 ? 'entry' : 'entries'} from ${fileName}.${details} Click Push to upload.`
+}
+
+function getEmptyImportStatusMessage(fileName: string, encryptedCount: number, unsupportedCount: number): string {
+  if (encryptedCount)
+    return `No entries imported from ${fileName}. ${encryptedCount} encrypted ${encryptedCount === 1 ? 'note uses' : 'notes use'} base64:aes, which cannot be read without the export key.`
+
+  if (unsupportedCount)
+    return `No entries imported from ${fileName}. ${unsupportedCount} unsupported ${unsupportedCount === 1 ? 'note' : 'notes'} found.`
+
+  return `No importable notes found in ${fileName}.`
 }

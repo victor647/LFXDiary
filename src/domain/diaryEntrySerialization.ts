@@ -141,6 +141,7 @@ function normalizeDeserializedEntry(entry: Partial<DiaryEntry>, diaryDate: strin
     updatedAt: entry.updatedAt || now,
     savedAt: entry.savedAt ?? entry.updatedAt ?? now,
     syncedAt: entry.syncedAt ?? null,
+    isEdited: entry.isEdited ?? false,
   }
 }
 

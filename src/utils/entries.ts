@@ -7,6 +7,7 @@ import {
   emptyMood,
 } from '../domain/constants'
 import type { City, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
+import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
 import { normalizeTag, normalizeTagColors, normalizeTags } from './tags'
 
@@ -30,6 +31,7 @@ export function makeBlankEntry(): DiaryEntry {
     updatedAt: now,
     savedAt: null,
     syncedAt: null,
+    isEdited: true,
   }
 }
 
@@ -59,9 +61,14 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
       ? entry.dailyWeatherText
       : weatherSamples.find((sample) => sample.weatherText)?.weatherText ?? 'Not fetched'
   const dailyPrecipitationMm =
-    typeof entry.dailyPrecipitationMm === 'number'
-      ? entry.dailyPrecipitationMm
-      : weatherSamples.find((sample) => typeof sample.dailyPrecipitationMm === 'number')?.dailyPrecipitationMm ?? 0
+    weatherSamples.some((sample) => typeof sample.dailyPrecipitationMm === 'number')
+      ? getWeightedDailyPrecipitationMm(weatherSamples)
+      : typeof entry.dailyPrecipitationMm === 'number'
+        ? entry.dailyPrecipitationMm
+        : 0
+
+  const updatedAt = entry.updatedAt ?? new Date().toISOString()
+  const syncedAt = entry.syncedAt ?? null
 
   return {
     ...entry,
@@ -72,8 +79,10 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
     weatherSamples,
     tagColors: normalizeTagColors(entry.tagColors ?? {}, tags),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
-    savedAt: entry.savedAt ?? entry.updatedAt ?? null,
-    syncedAt: entry.syncedAt ?? null,
+    updatedAt,
+    savedAt: entry.savedAt ?? updatedAt ?? null,
+    syncedAt,
+    isEdited: entry.isEdited ?? (!syncedAt || syncedAt < updatedAt),
   }
 }
 

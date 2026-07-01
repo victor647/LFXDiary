@@ -1,4 +1,4 @@
-import type { City, MoodScore, Period } from './types'
+import type { City, MoodScore, Period, TemperatureThresholds } from './types'
 
 export const STORAGE_KEY = 'lfx-diary.entries.v1'
 export const SETTINGS_KEY = 'lfx-diary.settings.v1'
@@ -36,6 +36,25 @@ export const DEFAULT_ACTIVITY_COLOR_GROUP_NAMES: Record<string, string> = {
 
 export const DEFAULT_LOCATION_COLOR = TAG_COLOR_PALETTE[3]
 export const LOCATION_COLOR_PALETTE = TAG_COLOR_PALETTE
+
+export const TEMPERATURE_COLOR_BAND_DEFINITIONS = [
+  { id: 'very-cold', color: TAG_COLOR_PALETTE[6] },
+  { id: 'freezing', color: TAG_COLOR_PALETTE[5] },
+  { id: 'cold', color: TAG_COLOR_PALETTE[4] },
+  { id: 'comfortable', color: TAG_COLOR_PALETTE[3] },
+  { id: 'warm', color: TAG_COLOR_PALETTE[2] },
+  { id: 'hot', color: TAG_COLOR_PALETTE[1] },
+  { id: 'very-hot', color: TAG_COLOR_PALETTE[0] },
+]
+
+export const DEFAULT_TEMPERATURE_THRESHOLDS: TemperatureThresholds = {
+  'very-cold': -10,
+  freezing: 0,
+  cold: 15,
+  comfortable: 25,
+  warm: 30,
+  hot: 35,
+}
 
 export const DEFAULT_CITY: City = {
   id: 'hangzhou-zhejiang-cn',

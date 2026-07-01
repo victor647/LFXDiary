@@ -5,10 +5,13 @@ import {
   DEFAULT_LAN_NAS_URL,
   DEFAULT_MARKDOWN_FOLDER,
   DEFAULT_PUBLIC_NAS_URL,
+  DEFAULT_TAG_COLOR,
+  DEFAULT_TEMPERATURE_THRESHOLDS,
   SETTINGS_KEY,
   TAG_COLOR_PALETTE,
+  TEMPERATURE_COLOR_BAND_DEFINITIONS,
 } from '../domain/constants'
-import type { AppSettings } from '../domain/types'
+import type { AppSettings, TemperatureColorBand, TemperatureThresholds } from '../domain/types'
 
 export const defaultSettings: AppSettings = {
   syncProvider: 'nas',
@@ -27,6 +30,8 @@ export const defaultSettings: AppSettings = {
   gitDiaryPath: DEFAULT_GIT_DIARY_PATH,
   gitCorsProxy: '',
   activityColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
+  activityTags: {},
+  temperatureThresholds: DEFAULT_TEMPERATURE_THRESHOLDS,
 }
 
 export function loadSettings(): AppSettings {
@@ -47,6 +52,7 @@ export function saveSettings(settings: AppSettings) {
 }
 
 export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
+  const legacySettings = settings as Partial<AppSettings> & { temperatureColorBands?: TemperatureColorBand[] }
   const publicNasUrl =
     settings.publicNasUrl === 'https://lafaxi647.cn:5001/'
       ? DEFAULT_PUBLIC_NAS_URL
@@ -73,6 +79,8 @@ export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     gitDiaryPath: normalizeGitPath(settings.gitDiaryPath || DEFAULT_GIT_DIARY_PATH),
     gitCorsProxy: normalizeOptionalUrl(settings.gitCorsProxy ?? ''),
     activityColorGroupNames: normalizeActivityColorGroupNames(settings.activityColorGroupNames ?? {}),
+    activityTags: normalizeActivityTags(settings.activityTags ?? {}),
+    temperatureThresholds: normalizeTemperatureThresholds(settings.temperatureThresholds ?? getLegacyTemperatureThresholds(legacySettings.temperatureColorBands)),
   }
 }
 
@@ -82,6 +90,40 @@ export function getActiveNasUrl(settings: AppSettings): string {
 
 export function getActivityColorGroupName(settings: AppSettings, color: string): string {
   return settings.activityColorGroupNames[color] || DEFAULT_ACTIVITY_COLOR_GROUP_NAMES[color] || color
+}
+
+export function getTemperatureColorBands(thresholds: TemperatureThresholds): TemperatureColorBand[] {
+  const normalizedThresholds = normalizeTemperatureThresholds(thresholds)
+
+  return TEMPERATURE_COLOR_BAND_DEFINITIONS.map((definition, index) => {
+    const previousDefinition = TEMPERATURE_COLOR_BAND_DEFINITIONS[index - 1]
+    const minC = previousDefinition ? normalizedThresholds[previousDefinition.id] : null
+    const maxC = index === TEMPERATURE_COLOR_BAND_DEFINITIONS.length - 1 ? null : normalizedThresholds[definition.id]
+
+    return {
+      ...definition,
+      label: formatTemperatureBandLabel(minC, maxC),
+      minC,
+      maxC,
+    }
+  })
+}
+
+export function normalizeTemperatureThresholds(thresholds: TemperatureThresholds): TemperatureThresholds {
+  const normalized: TemperatureThresholds = {}
+  let previousValue = Number.NEGATIVE_INFINITY
+
+  for (const definition of TEMPERATURE_COLOR_BAND_DEFINITIONS.slice(0, -1)) {
+    const rawValue = thresholds[definition.id]
+    const defaultValue = DEFAULT_TEMPERATURE_THRESHOLDS[definition.id]
+    const value = Number.isFinite(rawValue) ? rawValue : defaultValue
+    const nextValue = Math.max(Math.round(value), previousValue + 1)
+
+    normalized[definition.id] = nextValue
+    previousValue = nextValue
+  }
+
+  return normalized
 }
 
 function normalizeNasUrl(value: string): string {
@@ -131,4 +173,58 @@ function normalizeActivityColorGroupNames(names: Record<string, string>): Record
   }
 
   return normalized
+}
+
+function normalizeActivityTags(tags: AppSettings['activityTags']): AppSettings['activityTags'] {
+  const normalized: AppSettings['activityTags'] = {}
+
+  for (const [rawName, tag] of Object.entries(tags)) {
+    const name = rawName.trim()
+
+    if (!name)
+      continue
+
+    normalized[name] = {
+      color: tag.color || DEFAULT_TAG_COLOR,
+    }
+  }
+
+  return normalized
+}
+
+function getLegacyTemperatureThresholds(bands: TemperatureColorBand[] | undefined): TemperatureThresholds {
+  if (!bands)
+    return DEFAULT_TEMPERATURE_THRESHOLDS
+
+  const legacyThresholds: TemperatureThresholds = {}
+
+  for (const band of bands) {
+    if (typeof band.maxC !== 'number')
+      continue
+
+    if (band.id === 'below-freezing')
+      legacyThresholds['freezing'] = band.maxC
+    else if (band.id === 'mild')
+      legacyThresholds.comfortable = band.maxC
+    else if (band.id in DEFAULT_TEMPERATURE_THRESHOLDS)
+      legacyThresholds[band.id] = band.maxC
+  }
+
+  return {
+    ...DEFAULT_TEMPERATURE_THRESHOLDS,
+    ...legacyThresholds,
+  }
+}
+
+function formatTemperatureBandLabel(minC: number | null, maxC: number | null): string {
+  if (minC === null && maxC !== null)
+    return `< ${maxC}°C`
+
+  if (minC !== null && maxC === null)
+    return `>= ${minC}°C`
+
+  if (minC !== null && maxC !== null)
+    return `${minC}-${maxC}°C`
+
+  return 'Temperature'
 }

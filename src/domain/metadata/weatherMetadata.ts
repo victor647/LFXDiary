@@ -1,5 +1,6 @@
 import { DEFAULT_CITY, periodConfig, weatherCodeText } from '../constants'
 import type { City, DiaryEntry, WeatherSample } from '../types'
+import { getWeightedDailyPrecipitationMm } from '../weatherSummary'
 import { findCityByIdOrDisplayName } from './locationMetadata'
 
 export function serializeWeatherMetadata(entry: DiaryEntry): string[] {
@@ -206,11 +207,15 @@ function normalizeParsedWeatherText(text: unknown, samples: unknown): string {
 }
 
 function normalizeParsedPrecipitation(value: unknown, samples: unknown): number {
+  const parsedSamples = normalizeParsedWeatherSamples(samples)
+
+  if (parsedSamples.some((sample) => typeof sample.dailyPrecipitationMm === 'number'))
+    return getWeightedDailyPrecipitationMm(parsedSamples)
+
   if (typeof value === 'number')
     return Math.round(value * 10) / 10
 
-  const parsedSamples = normalizeParsedWeatherSamples(samples)
-  return parsedSamples.find((sample) => typeof sample.dailyPrecipitationMm === 'number')?.dailyPrecipitationMm ?? 0
+  return 0
 }
 
 function findWeatherCodeByText(text: string): number | null {

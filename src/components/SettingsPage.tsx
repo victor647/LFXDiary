@@ -1,6 +1,5 @@
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   ChevronRight,
   GitBranch,
@@ -10,14 +9,25 @@ import {
   PersonStanding,
   Save,
   Tags,
-  Trash2,
+  Thermometer,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { DEFAULT_TAG_COLOR, LOCATION_COLOR_PALETTE, TAG_COLOR_PALETTE } from '../domain/constants'
 import type { AppSettings, DiaryEntry } from '../domain/types'
-import { getLocationNameKey, updateEntryActivity, updateEntryLocations } from '../utils/diaryEntryHelpers'
-import { getActiveNasUrl, getActivityColorGroupName } from '../utils/settings'
+import { getLocationNameKey, updateEntryActivity } from '../utils/diaryEntryHelpers'
+import {
+  getActiveNasUrl,
+  getActivityColorGroupName,
+  getTemperatureColorBands,
+  normalizeTemperatureThresholds,
+} from '../utils/settings'
 import { normalizeTag } from '../utils/tags'
+import {
+  ActivityAddButton,
+  ActivityAddDialog,
+  ActivityChipButton,
+  ActivityEditDialog,
+} from './ActivityTagControls'
 
 type SettingsPageProps = {
   settings: AppSettings
@@ -65,23 +75,19 @@ export function SettingsPage({
   const isNasSync = settings.syncProvider === 'nas'
   const isGitSync = settings.syncProvider === 'git'
   const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
-  const activityTags = useMemo(() => getActivityTags(catalogEntries), [catalogEntries])
+  const activityTags = useMemo(() => getActivityTags(catalogEntries, settings), [catalogEntries, settings])
   const activityColorGroups = useMemo(() => getActivityColorGroups(activityTags, settings), [activityTags, settings])
   const locationTags = useMemo(() => getLocationTags(catalogEntries), [catalogEntries])
-  const [activityDraftNames, setActivityDraftNames] = useState<Record<string, string>>({})
-  const [locationDraftNames, setLocationDraftNames] = useState<Record<string, string>>({})
+  const temperatureColorBands = useMemo(
+    () => getTemperatureColorBands(settings.temperatureThresholds),
+    [settings.temperatureThresholds],
+  )
+  const [addingActivityColor, setAddingActivityColor] = useState<string | null>(null)
+  const [editingActivityTag, setEditingActivityTag] = useState<ActivityTagItem | null>(null)
   const [expandedActivityManagerColor, setExpandedActivityManagerColor] = useState<string | null>(null)
 
-  useEffect(() => {
-    setActivityDraftNames((current) => syncDraftNames(current, activityTags, (tag) => tag.name, (tag) => tag.name))
-  }, [activityTags])
-
-  useEffect(() => {
-    setLocationDraftNames((current) => syncDraftNames(current, locationTags, (location) => location.key, (location) => location.name))
-  }, [locationTags])
-
-  function applyActivityTag(oldTag: string, fallbackName: string, color: string) {
-    const nextTag = normalizeTag(activityDraftNames[oldTag] ?? fallbackName)
+  function applyActivityTag(oldTag: string, nextName: string, color: string) {
+    const nextTag = normalizeTag(nextName)
 
     if (!nextTag) {
       onStatusChange('Activity name cannot be empty.')
@@ -90,9 +96,38 @@ export function SettingsPage({
 
     const nextEntries = entries.map((entry) => updateEntryActivity(entry, oldTag, nextTag, color))
     const nextDraft = updateEntryActivity(draft, oldTag, nextTag, color)
+    onSettingsChange({
+      ...settings,
+      activityTags: updateActivityTagCatalog(settings.activityTags, oldTag, nextTag, color),
+    })
     onEntriesChange(nextEntries)
     onDraftChange(nextDraft)
+    setEditingActivityTag(null)
     onStatusChange(`Updated activity: ${nextTag}`)
+  }
+
+  function addActivityTag(rawTag: string, color: string) {
+    const nextTag = normalizeTag(rawTag)
+
+    if (!nextTag) {
+      onStatusChange('Activity name cannot be empty.')
+      return
+    }
+
+    if (activityTags.some((tag) => tag.name === nextTag)) {
+      onStatusChange(`Activity already exists: ${nextTag}`)
+      return
+    }
+
+    onSettingsChange({
+      ...settings,
+      activityTags: {
+        ...settings.activityTags,
+        [nextTag]: { color },
+      },
+    })
+    setAddingActivityColor(null)
+    onStatusChange(`Added activity: ${nextTag}`)
   }
 
   function updateActivityGroupName(color: string, name: string) {
@@ -106,40 +141,44 @@ export function SettingsPage({
   }
 
   function deleteActivityTag(tag: string) {
-    if (!window.confirm(`Delete activity "${tag}" from all entries?`))
+    const usageCount = activityTags.find((activityTag) => normalizeTag(activityTag.name) === normalizeTag(tag))?.count ?? 0
+
+    if (usageCount > 0 && !window.confirm(`Delete activity "${tag}" from ${usageCount} ${usageCount === 1 ? 'entry' : 'entries'}?`))
       return
 
     const nextEntries = entries.map((entry) => deleteEntryActivity(entry, tag))
     const nextDraft = deleteEntryActivity(draft, tag)
+    onSettingsChange({
+      ...settings,
+      activityTags: deleteActivityTagCatalog(settings.activityTags, tag),
+    })
     onEntriesChange(nextEntries)
     onDraftChange(nextDraft)
+    setEditingActivityTag(null)
     onStatusChange(`Deleted activity: ${tag}`)
   }
 
-  function applyLocationTag(location: LocationTagItem, color: string) {
-    const nextName = (locationDraftNames[location.key] ?? location.name).trim()
-
-    if (!nextName) {
-      onStatusChange('Location name cannot be empty.')
-      return
-    }
-
-    const nextEntries = entries.map((entry) => updateEntryLocations(entry, location.key, nextName, color))
-    const nextDraft = updateEntryLocations(draft, location.key, nextName, color)
+  function applyLocationColor(location: LocationTagItem, color: string) {
+    const nextEntries = entries.map((entry) => updateEntryLocationColor(entry, location.key, color))
+    const nextDraft = updateEntryLocationColor(draft, location.key, color)
     onEntriesChange(nextEntries)
     onDraftChange(nextDraft)
-    onStatusChange(`Updated location: ${nextName}`)
+    onStatusChange(`Updated location color: ${location.name}`)
   }
 
-  function deleteLocationTag(location: LocationTagItem) {
-    if (!window.confirm(`Delete location "${location.name}" from all entries?`))
+  function updateTemperatureThreshold(bandId: string, value: string) {
+    const threshold = Number.parseInt(value, 10)
+
+    if (!Number.isFinite(threshold))
       return
 
-    const nextEntries = entries.map((entry) => deleteEntryLocation(entry, location.key))
-    const nextDraft = deleteEntryLocation(draft, location.key)
-    onEntriesChange(nextEntries)
-    onDraftChange(nextDraft)
-    onStatusChange(`Deleted location: ${location.name}`)
+    onSettingsChange({
+      ...settings,
+      temperatureThresholds: normalizeTemperatureThresholds({
+        ...settings.temperatureThresholds,
+        [bandId]: threshold,
+      }),
+    })
   }
 
   return (
@@ -155,31 +194,32 @@ export function SettingsPage({
         </div>
       </div>
 
-      <div className="settings-section">
-        <div className="settings-section-title">
-          <HardDrive size={16} />
-          Sync Provider
-        </div>
-        <div className="settings-mode-control">
-          <button
-            className={isNasSync ? 'selected' : ''}
-            type="button"
-            onClick={() => onSettingsChange({ ...settings, syncProvider: 'nas' })}
-          >
-            NAS
-          </button>
-          <button
-            className={isGitSync ? 'selected' : ''}
-            type="button"
-            onClick={() => onSettingsChange({ ...settings, syncProvider: 'git' })}
-          >
-            Git
-          </button>
-        </div>
-      </div>
-
-      {isNasSync && (
+      <div className="settings-body">
         <div className="settings-section">
+          <div className="settings-section-title">
+            <HardDrive size={16} />
+            Sync Provider
+          </div>
+          <div className="settings-mode-control">
+            <button
+              className={isNasSync ? 'selected' : ''}
+              type="button"
+              onClick={() => onSettingsChange({ ...settings, syncProvider: 'nas' })}
+            >
+              NAS
+            </button>
+            <button
+              className={isGitSync ? 'selected' : ''}
+              type="button"
+              onClick={() => onSettingsChange({ ...settings, syncProvider: 'git' })}
+            >
+              Git
+            </button>
+          </div>
+        </div>
+
+        {isNasSync && (
+          <div className="settings-section">
           <div className="settings-section-title">
             <Network size={16} />
             NAS Connection
@@ -398,50 +438,20 @@ export function SettingsPage({
                       <span className="tag-manager-count">{group.tags.length}</span>
                     </div>
                     {isExpanded && (
-                      <div className="activity-manager-tags">
+                      <div className="activity-manager-chip-list">
                         {group.tags.map((tag) => (
-                          <div className="activity-manager-tag-row" key={tag.name}>
-                            <input
-                              aria-label={`Activity ${tag.name}`}
-                              value={activityDraftNames[tag.name] ?? tag.name}
-                              onChange={(event) =>
-                                setActivityDraftNames((current) => ({ ...current, [tag.name]: event.target.value }))
-                              }
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter')
-                                  applyActivityTag(tag.name, tag.name, tag.color)
-                              }}
-                            />
-                            <span className="tag-manager-count">{tag.count}</span>
-                            <select
-                              aria-label={`Move ${tag.name} to activity group`}
-                              value={tag.color}
-                              onChange={(event) => applyActivityTag(tag.name, tag.name, event.target.value)}
-                            >
-                              {activityColorGroups.map((option) => (
-                                <option key={option.color} value={option.color}>
-                                  {option.name}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              className="tag-manager-icon-button"
-                              type="button"
-                              title={`Save ${tag.name}`}
-                              onClick={() => applyActivityTag(tag.name, tag.name, tag.color)}
-                            >
-                              <Check size={14} />
-                            </button>
-                            <button
-                              className="tag-manager-icon-button danger-button"
-                              type="button"
-                              title={`Delete ${tag.name}`}
-                              onClick={() => deleteActivityTag(tag.name)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                          <ActivityChipButton
+                            count={tag.count}
+                            color={tag.color}
+                            key={tag.name}
+                            name={tag.name}
+                            onClick={() => setEditingActivityTag(tag)}
+                          />
                         ))}
+                        <ActivityAddButton
+                          title={`Add activity to ${group.name}`}
+                          onClick={() => setAddingActivityColor(group.color)}
+                        />
                       </div>
                     )}
                   </div>
@@ -465,17 +475,7 @@ export function SettingsPage({
                     style={{ backgroundColor: location.color }}
                     title={`Location color ${location.color}`}
                   />
-                  <input
-                    aria-label={`Location ${location.name}`}
-                    value={locationDraftNames[location.key] ?? location.name}
-                    onChange={(event) =>
-                      setLocationDraftNames((current) => ({ ...current, [location.key]: event.target.value }))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter')
-                        applyLocationTag(location, location.color)
-                    }}
-                  />
+                  <span className="tag-manager-name" title={location.name}>{location.name}</span>
                   <span className="tag-manager-count">{location.count}</span>
                   <div className="tag-manager-palette" aria-label={`Location ${location.name} color`}>
                     {LOCATION_COLOR_PALETTE.map((color) => (
@@ -485,26 +485,10 @@ export function SettingsPage({
                         type="button"
                         style={{ backgroundColor: color }}
                         title={`Set color ${color}`}
-                        onClick={() => applyLocationTag(location, color)}
+                        onClick={() => applyLocationColor(location, color)}
                       />
                     ))}
                   </div>
-                  <button
-                    className="tag-manager-icon-button"
-                    type="button"
-                    title={`Save ${location.name}`}
-                    onClick={() => applyLocationTag(location, location.color)}
-                  >
-                    <Check size={14} />
-                  </button>
-                  <button
-                    className="tag-manager-icon-button danger-button"
-                    type="button"
-                    title={`Delete ${location.name}`}
-                    onClick={() => deleteLocationTag(location)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
                 </div>
               ))
             ) : (
@@ -514,18 +498,86 @@ export function SettingsPage({
         </div>
       </div>
 
+      <div className="settings-section">
+        <div className="settings-section-title">
+          <Thermometer size={16} />
+          Temperature Colors
+        </div>
+        <div className="temperature-settings-list">
+          {temperatureColorBands.map((band, index) => (
+            <div className="temperature-settings-row" key={band.id}>
+              <span
+                className="tag-manager-swatch"
+                style={{ backgroundColor: band.color }}
+                title={`Temperature color ${band.color}`}
+              />
+              <span className="tag-manager-name">{band.label}</span>
+              <span
+                className="temperature-settings-preview"
+                style={{ backgroundColor: `${band.color}1f`, borderColor: band.color }}
+              />
+              {index < temperatureColorBands.length - 1 ? (
+                <label className="temperature-threshold-input">
+                  Ends below
+                  <input
+                    type="number"
+                    value={band.maxC ?? ''}
+                    onChange={(event) => updateTemperatureThreshold(band.id, event.target.value)}
+                  />
+                </label>
+              ) : (
+                <span className="temperature-threshold-tail">Above last limit</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {addingActivityColor && (
+        <ActivityAddDialog
+          colorNames={settings.activityColorGroupNames}
+          initialColor={addingActivityColor}
+          onAdd={addActivityTag}
+          onCancel={() => setAddingActivityColor(null)}
+        />
+      )}
+      {editingActivityTag && (
+        <ActivityEditDialog
+          colorNames={settings.activityColorGroupNames}
+          initialColor={editingActivityTag.color}
+          initialName={editingActivityTag.name}
+          onCancel={() => setEditingActivityTag(null)}
+          onDelete={() => deleteActivityTag(editingActivityTag.name)}
+          onSave={(name, color) => applyActivityTag(editingActivityTag.name, name, color)}
+        />
+      )}
+
       <div className="settings-actions">
         <button type="button" onClick={onSave}>
           <Save size={16} />
           Save Settings
         </button>
       </div>
+      </div>
     </section>
   )
 }
 
-function getActivityTags(entries: DiaryEntry[]): ActivityTagItem[] {
+function getActivityTags(entries: DiaryEntry[], settings: AppSettings): ActivityTagItem[] {
   const tags = new Map<string, ActivityTagItem>()
+
+  for (const [name, tag] of Object.entries(settings.activityTags)) {
+    const normalizedName = normalizeTag(name)
+
+    if (!normalizedName)
+      continue
+
+    tags.set(normalizedName, {
+      name: normalizedName,
+      color: tag.color || DEFAULT_TAG_COLOR,
+      count: 0,
+    })
+  }
 
   for (const entry of entries) {
     for (const tag of entry.tags) {
@@ -563,6 +615,35 @@ function getActivityColorGroups(activityTags: ActivityTagItem[], settings: AppSe
   }))
 }
 
+function updateActivityTagCatalog(
+  activityTags: AppSettings['activityTags'],
+  oldTag: string,
+  nextTag: string,
+  color: string,
+): AppSettings['activityTags'] {
+  const nextActivityTags = { ...activityTags }
+
+  delete nextActivityTags[oldTag]
+  nextActivityTags[nextTag] = { color }
+
+  return nextActivityTags
+}
+
+function deleteActivityTagCatalog(
+  activityTags: AppSettings['activityTags'],
+  tag: string,
+): AppSettings['activityTags'] {
+  const normalizedTag = normalizeTag(tag)
+  const nextActivityTags: AppSettings['activityTags'] = {}
+
+  for (const [name, activityTag] of Object.entries(activityTags)) {
+    if (normalizeTag(name) !== normalizedTag)
+      nextActivityTags[name] = activityTag
+  }
+
+  return nextActivityTags
+}
+
 function getLocationTags(entries: DiaryEntry[]): LocationTagItem[] {
   const locations = new Map<string, LocationTagItem>()
 
@@ -583,58 +664,42 @@ function getLocationTags(entries: DiaryEntry[]): LocationTagItem[] {
   return Array.from(locations.values()).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-function syncDraftNames<T>(
-  current: Record<string, string>,
-  items: T[],
-  getKey: (item: T) => string,
-  getName: (item: T) => string,
-): Record<string, string> {
-  const next: Record<string, string> = {}
-
-  for (const item of items) {
-    const key = getKey(item)
-    next[key] = current[key] ?? getName(item)
-  }
-
-  return next
-}
-
 function deleteEntryActivity(entry: DiaryEntry, tag: string): DiaryEntry {
-  if (!entry.tags.includes(tag))
+  const normalizedTag = normalizeTag(tag)
+  const matchingTags = entry.tags.filter((item) => normalizeTag(item) === normalizedTag)
+
+  if (!matchingTags.length)
     return entry
 
   const tagColors = { ...entry.tagColors }
-  delete tagColors[tag]
+
+  for (const matchingTag of matchingTags)
+    delete tagColors[matchingTag]
 
   return {
     ...entry,
-    tags: entry.tags.filter((item) => item !== tag),
+    tags: entry.tags.filter((item) => normalizeTag(item) !== normalizedTag),
     tagColors,
     updatedAt: new Date().toISOString(),
+    isEdited: true,
   }
 }
 
-function deleteEntryLocation(entry: DiaryEntry, locationKey: string): DiaryEntry {
-  const removedCityIds = new Set(entry.cities.filter((city) => getLocationNameKey(city) === locationKey).map((city) => city.id))
+function updateEntryLocationColor(entry: DiaryEntry, locationKey: string, color: string): DiaryEntry {
+  const matchingCityIds = entry.cities.filter((city) => getLocationNameKey(city) === locationKey).map((city) => city.id)
 
-  if (!removedCityIds.size)
+  if (!matchingCityIds.length)
     return entry
 
   const locationColors = { ...entry.locationColors }
 
-  for (const cityId of removedCityIds)
-    delete locationColors[cityId]
-
-  const hasRemovedWeatherSample = entry.weatherSamples.some((sample) => removedCityIds.has(sample.cityId))
+  for (const cityId of matchingCityIds)
+    locationColors[cityId] = color
 
   return {
     ...entry,
-    cities: entry.cities.filter((city) => !removedCityIds.has(city.id)),
     locationColors,
-    weatherSamples: hasRemovedWeatherSample ? [] : entry.weatherSamples,
-    dailyWeatherCode: hasRemovedWeatherSample ? null : entry.dailyWeatherCode,
-    dailyWeatherText: hasRemovedWeatherSample ? 'Not fetched' : entry.dailyWeatherText,
-    dailyPrecipitationMm: hasRemovedWeatherSample ? 0 : entry.dailyPrecipitationMm,
     updatedAt: new Date().toISOString(),
+    isEdited: true,
   }
 }

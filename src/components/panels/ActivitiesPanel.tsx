@@ -1,8 +1,13 @@
-import { ChevronRight, PersonStanding, Plus } from 'lucide-react'
+import { ChevronRight, PersonStanding } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY, TAG_COLOR_PALETTE } from '../../domain/constants'
 import type { AppSettings, DiaryEntry } from '../../domain/types'
-import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
+import {
+  ActivityAddButton,
+  ActivityAddDialog,
+  ActivityChipButton,
+  ActivityEditDialog,
+} from '../ActivityTagControls'
 import { updateEntryActivity } from '../../utils/diaryEntryHelpers'
 import { getRecentTags } from '../../utils/entries'
 import { getActivityColorGroupName } from '../../utils/settings'
@@ -12,6 +17,7 @@ type ActivitiesPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  onSettingsChange: (settings: AppSettings) => void
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
@@ -22,24 +28,28 @@ export function ActivitiesPanel({
   draft,
   entries,
   settings,
+  onSettingsChange,
   onUpdateDraft,
   onDraftChange,
   onEntriesChange,
   onStatusChange,
 }: ActivitiesPanelProps) {
-  const [tagInput, setTagInput] = useState('')
-  const [selectedTagColor, setSelectedTagColor] = useState(DEFAULT_TAG_COLOR)
   const [editingActivityName, setEditingActivityName] = useState<string | null>(null)
-  const [editingActivityDraftName, setEditingActivityDraftName] = useState('')
-  const [editingActivityColor, setEditingActivityColor] = useState(DEFAULT_TAG_COLOR)
   const [isActivityAddOpen, setIsActivityAddOpen] = useState(false)
-  const [isOtherActivityDialogOpen, setIsOtherActivityDialogOpen] = useState(false)
+  const [addingActivityColor, setAddingActivityColor] = useState<string | null>(null)
   const [expandedActivityColor, setExpandedActivityColor] = useState(DEFAULT_TAG_COLOR)
   const activityAddRef = useRef<HTMLDivElement>(null)
-  const availableRecentTags = useMemo(
-    () => getRecentTags(entries).filter((tag) => !draft.tags.includes(tag.name)),
-    [draft.tags, entries],
-  )
+  const availableRecentTags = useMemo(() => {
+    const tags = new Map(getRecentTags(entries).map((tag) => [tag.name, tag.color]))
+
+    for (const [name, tag] of Object.entries(settings.activityTags))
+      tags.set(name, tag.color)
+
+    return Array.from(tags.entries())
+      .map(([name, color]) => ({ name, color }))
+      .filter((tag) => !draft.tags.includes(tag.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [draft.tags, entries, settings.activityTags])
   const activityColorGroups = useMemo(() => {
     const groups = new Map<string, typeof availableRecentTags>()
 
@@ -52,7 +62,6 @@ export function ActivitiesPanel({
 
     return [...TAG_COLOR_PALETTE, ...customColors]
       .map((color) => ({ color, tags: groups.get(color) ?? [] }))
-      .filter((group) => group.tags.length)
   }, [availableRecentTags])
   const visibleExpandedActivityColor = activityColorGroups.some((group) => group.color === expandedActivityColor)
     ? expandedActivityColor
@@ -77,7 +86,7 @@ export function ActivitiesPanel({
     return () => document.removeEventListener('pointerdown', closeActivityAddOnOutsideClick)
   }, [isActivityAddOpen])
 
-  function addTag(rawTag: string, color = selectedTagColor) {
+  function addTag(rawTag: string, color = DEFAULT_TAG_COLOR) {
     const tag = normalizeTag(rawTag)
 
     if (!tag)
@@ -95,16 +104,20 @@ export function ActivitiesPanel({
         [tag]: color,
       },
     })
-    setTagInput('')
+    onSettingsChange({
+      ...settings,
+      activityTags: {
+        ...settings.activityTags,
+        [tag]: { color },
+      },
+    })
     setIsActivityAddOpen(false)
-    setIsOtherActivityDialogOpen(false)
+    setAddingActivityColor(null)
   }
 
-  function openOtherActivityDialog() {
+  function openActivityDialog(color: string) {
     setIsActivityAddOpen(false)
-    setIsOtherActivityDialogOpen(true)
-    setTagInput('')
-    setSelectedTagColor(DEFAULT_TAG_COLOR)
+    setAddingActivityColor(color)
   }
 
   function removeTag(tag: string) {
@@ -118,32 +131,32 @@ export function ActivitiesPanel({
 
   function openActivityEditor(tag: string) {
     setEditingActivityName(tag)
-    setEditingActivityDraftName(tag)
-    setEditingActivityColor(draft.tagColors[tag] ?? DEFAULT_TAG_COLOR)
   }
 
   function closeActivityEditor() {
     setEditingActivityName(null)
-    setEditingActivityDraftName('')
-    setEditingActivityColor(DEFAULT_TAG_COLOR)
   }
 
-  function confirmActivityEdit() {
+  function confirmActivityEdit(nextName: string, color: string) {
     if (!editingActivityName)
       return
 
-    const nextTag = normalizeTag(editingActivityDraftName)
+    const nextTag = normalizeTag(nextName)
 
     if (!nextTag)
       return
 
-    const nextEntries = entries.map((entry) => updateEntryActivity(entry, editingActivityName, nextTag, editingActivityColor))
-    const nextDraft = updateEntryActivity(draft, editingActivityName, nextTag, editingActivityColor)
+    const nextEntries = entries.map((entry) => updateEntryActivity(entry, editingActivityName, nextTag, color))
+    const nextDraft = updateEntryActivity(draft, editingActivityName, nextTag, color)
 
+    onSettingsChange({
+      ...settings,
+      activityTags: updateActivityTagCatalog(settings.activityTags, editingActivityName, nextTag, color),
+    })
     onEntriesChange(nextEntries)
     onDraftChange(nextDraft)
     closeActivityEditor()
-    onStatusChange(`Updated activity: ${nextTag}`)
+    onStatusChange(`Updated activity globally: ${nextTag}`)
   }
 
   function deleteEditingActivity() {
@@ -162,28 +175,17 @@ export function ActivitiesPanel({
       </div>
       <div className="activity-chips" ref={activityAddRef}>
         {draft.tags.map((tag) => (
-          <button
+          <ActivityChipButton
+            color={draft.tagColors[tag] ?? DEFAULT_TAG_COLOR}
             key={tag}
-            type="button"
-            style={{
-              backgroundColor: getTagBackgroundColor(draft.tagColors[tag] ?? DEFAULT_TAG_COLOR),
-              borderColor: draft.tagColors[tag] ?? DEFAULT_TAG_COLOR,
-              color: getTagTextColor(draft.tagColors[tag] ?? DEFAULT_TAG_COLOR),
-            }}
+            name={tag}
             onClick={() => openActivityEditor(tag)}
-          >
-            {tag}
-          </button>
+          />
         ))}
-        <button
-          className="activity-add-toggle"
-          type="button"
+        <ActivityAddButton
           disabled={draft.tags.length >= MAX_ACTIVITIES_PER_ENTRY}
-          title="Add activity"
           onClick={() => setIsActivityAddOpen((isOpen) => !isOpen)}
-        >
-          <Plus size={15} />
-        </button>
+        />
         {isActivityAddOpen && (
           <div className="activity-recent-popover">
             {activityColorGroups.map((group) => {
@@ -210,107 +212,67 @@ export function ActivitiesPanel({
                   {isExpanded && (
                     <div className="activity-color-options">
                       {group.tags.map((tag) => (
-                        <button
+                        <ActivityChipButton
+                          color={tag.color}
                           key={tag.name}
-                          type="button"
-                          style={{
-                            backgroundColor: getTagBackgroundColor(tag.color),
-                            borderColor: tag.color,
-                            color: getTagTextColor(tag.color),
-                          }}
+                          name={tag.name}
                           onClick={() => addTag(tag.name, tag.color)}
-                        >
-                          {tag.name}
-                        </button>
+                        />
                       ))}
+                      <ActivityAddButton
+                        title={`Add activity to ${getActivityColorGroupName(settings, group.color)}`}
+                        onClick={() => openActivityDialog(group.color)}
+                      />
                     </div>
                   )}
                 </div>
               )
             })}
-            <button className="activity-other-option" type="button" onClick={openOtherActivityDialog}>
+            <button className="activity-other-option" type="button" onClick={() => openActivityDialog(DEFAULT_TAG_COLOR)}>
               Other
             </button>
           </div>
         )}
       </div>
-      {isOtherActivityDialogOpen && (
-        <div className="dialog-backdrop" role="presentation">
-          <div className="activity-dialog" role="dialog" aria-modal="true" aria-label="Add activity">
-            <div className="compact-title">Add Activity</div>
-            <div className="location-color-palette" aria-label="Activity color">
-              {TAG_COLOR_PALETTE.map((color) => (
-                <button
-                  className={selectedTagColor === color ? 'tag-color-swatch selected' : 'tag-color-swatch'}
-                  key={color}
-                  type="button"
-                  style={{ backgroundColor: color }}
-                  title={`Activity color ${color}`}
-                  onClick={() => setSelectedTagColor(color)}
-                />
-              ))}
-            </div>
-            <div className="tag-input">
-              <input
-                value={tagInput}
-                onChange={(event) => setTagInput(event.target.value)}
-                placeholder="Movie Night"
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter')
-                    addTag(tagInput)
-                }}
-              />
-              <button type="button" onClick={() => addTag(tagInput)}>
-                Confirm
-              </button>
-            </div>
-            <div className="dialog-actions">
-              <button type="button" onClick={() => setIsOtherActivityDialogOpen(false)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+      {addingActivityColor && (
+        <ActivityAddDialog
+          colorNames={settings.activityColorGroupNames}
+          initialColor={addingActivityColor}
+          onAdd={addTag}
+          onCancel={() => setAddingActivityColor(null)}
+        />
       )}
       {editingActivityName && (
-        <div className="dialog-backdrop" role="presentation">
-          <div className="activity-dialog" role="dialog" aria-modal="true" aria-label="Edit activity">
-            <div className="compact-title">Edit Activity</div>
-            <div className="location-color-palette" aria-label="Activity color">
-              {TAG_COLOR_PALETTE.map((color) => (
-                <button
-                  className={editingActivityColor === color ? 'tag-color-swatch selected' : 'tag-color-swatch'}
-                  key={color}
-                  type="button"
-                  style={{ backgroundColor: color }}
-                  title={`Activity color ${color}`}
-                  onClick={() => setEditingActivityColor(color)}
-                />
-              ))}
-            </div>
-            <input
-              value={editingActivityDraftName}
-              onChange={(event) => setEditingActivityDraftName(event.target.value)}
-              placeholder="Movie Night"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter')
-                  confirmActivityEdit()
-              }}
-            />
-            <div className="dialog-actions">
-              <button className="danger-button" type="button" onClick={deleteEditingActivity}>
-                Delete
-              </button>
-              <button type="button" onClick={closeActivityEditor}>
-                Cancel
-              </button>
-              <button type="button" onClick={confirmActivityEdit}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <ActivityEditDialog
+          colorNames={settings.activityColorGroupNames}
+          initialColor={draft.tagColors[editingActivityName] ?? DEFAULT_TAG_COLOR}
+          initialName={editingActivityName}
+          onCancel={closeActivityEditor}
+          onDelete={deleteEditingActivity}
+          onSave={confirmActivityEdit}
+        />
       )}
     </div>
   )
+}
+
+function updateActivityTagCatalog(
+  activityTags: AppSettings['activityTags'],
+  oldTag: string,
+  nextTag: string,
+  color: string,
+): AppSettings['activityTags'] {
+  const normalizedOldTag = normalizeTag(oldTag)
+  const normalizedNextTag = normalizeTag(nextTag)
+  const nextActivityTags: AppSettings['activityTags'] = {}
+
+  for (const [name, tag] of Object.entries(activityTags)) {
+    if (normalizeTag(name) !== normalizedOldTag)
+      nextActivityTags[name] = tag
+  }
+
+  if (normalizedNextTag)
+    nextActivityTags[normalizedNextTag] = { color }
+
+  return nextActivityTags
 }

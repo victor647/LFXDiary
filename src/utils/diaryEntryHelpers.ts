@@ -1,27 +1,15 @@
-import { weatherCodeText } from '../domain/constants'
-import type { City, DiaryEntry, WeatherSample } from '../domain/types'
+import type { City, DiaryEntry } from '../domain/types'
+import { getDailyWeatherFields, getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
+export { getDailyWeatherFields, getWeightedDailyPrecipitationMm }
 import { formatCityDisplayName } from './city'
 import { upsertEntry } from './entries'
-import { normalizeTags } from './tags'
+import { normalizeTag, normalizeTags } from './tags'
 
 export function clampMood(value: number): number {
   if (Number.isNaN(value))
     return 5
 
   return Math.max(0, Math.min(10, Math.round(value)))
-}
-
-export function getDailyWeatherFields(
-  samples: WeatherSample[],
-): Pick<DiaryEntry, 'dailyWeatherCode' | 'dailyWeatherText' | 'dailyPrecipitationMm'> {
-  const sample = samples.find((item) => typeof item.weatherCode === 'number')
-  const dailyWeatherCode = sample?.dailyWeatherCode ?? sample?.weatherCode ?? null
-
-  return {
-    dailyWeatherCode,
-    dailyWeatherText: dailyWeatherCode === null ? sample?.weatherText ?? 'Not fetched' : getWeatherCodeText(dailyWeatherCode),
-    dailyPrecipitationMm: sample?.dailyPrecipitationMm ?? 0,
-  }
 }
 
 export function getNormalizedDailyWeatherFields(
@@ -31,7 +19,9 @@ export function getNormalizedDailyWeatherFields(
     return {
       dailyWeatherCode: entry.dailyWeatherCode,
       dailyWeatherText: entry.dailyWeatherText,
-      dailyPrecipitationMm: entry.dailyPrecipitationMm,
+      dailyPrecipitationMm: entry.weatherSamples.length
+        ? getWeightedDailyPrecipitationMm(entry.weatherSamples)
+        : entry.dailyPrecipitationMm,
     }
 
   return getDailyWeatherFields(entry.weatherSamples)
@@ -60,22 +50,39 @@ export function updateEntryLocations(entry: DiaryEntry, locationKey: string, nex
     cities,
     locationColors,
     updatedAt: new Date().toISOString(),
+    isEdited: true,
   }
 }
 
 export function updateEntryActivity(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  if (!entry.tags.includes(oldTag))
+  const normalizedOldTag = normalizeTag(oldTag)
+  const normalizedNextTag = normalizeTag(nextTag)
+
+  if (!normalizedOldTag || !normalizedNextTag)
     return entry
 
   const tagColors = { ...entry.tagColors }
-  delete tagColors[oldTag]
-  tagColors[nextTag] = color
+  let changed = false
+  const tags = entry.tags.map((tag) => {
+    if (normalizeTag(tag) !== normalizedOldTag)
+      return tag
+
+    changed = true
+    delete tagColors[tag]
+    return normalizedNextTag
+  })
+
+  if (!changed)
+    return entry
+
+  tagColors[normalizedNextTag] = color
 
   return {
     ...entry,
-    tags: normalizeTags(entry.tags.map((tag) => (tag === oldTag ? nextTag : tag))),
+    tags: normalizeTags(tags),
     tagColors,
     updatedAt: new Date().toISOString(),
+    isEdited: true,
   }
 }
 
@@ -84,7 +91,7 @@ export function getLocationNameKey(city: City): string {
 }
 
 export function isEntryUnsynced(entry: DiaryEntry): boolean {
-  return !entry.syncedAt || entry.syncedAt < entry.updatedAt
+  return entry.isEdited || !entry.syncedAt || entry.syncedAt < entry.updatedAt
 }
 
 export function hasCloudCopy(entry: DiaryEntry): boolean {
@@ -93,8 +100,4 @@ export function hasCloudCopy(entry: DiaryEntry): boolean {
 
 export function upsertEntries(entries: DiaryEntry[], updatedEntries: DiaryEntry[]): DiaryEntry[] {
   return updatedEntries.reduce((current, entry) => upsertEntry(current, entry), entries)
-}
-
-function getWeatherCodeText(code: number): string {
-  return weatherCodeText[code] ?? 'Unknown'
 }

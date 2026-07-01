@@ -9,6 +9,7 @@ type MetadataEditorProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  onSettingsChange: (settings: AppSettings) => void
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onUpdateDraftIfCurrent: (entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
@@ -21,6 +22,7 @@ export function MetadataEditor({
   draft,
   entries,
   settings,
+  onSettingsChange,
   onUpdateDraft,
   onUpdateDraftIfCurrent,
   onDraftChange,
@@ -40,8 +42,9 @@ export function MetadataEditor({
         onStatusChange={onStatusChange}
       />
       <WeatherPanel
+        key={draft.id}
         draft={draft}
-        onUpdateDraft={onUpdateDraft}
+        settings={settings}
         onUpdateDraftIfCurrent={onUpdateDraftIfCurrent}
         onStatusChange={onStatusChange}
         onErrorLog={onErrorLog}
@@ -50,6 +53,7 @@ export function MetadataEditor({
         draft={draft}
         entries={entries}
         settings={settings}
+        onSettingsChange={onSettingsChange}
         onUpdateDraft={onUpdateDraft}
         onDraftChange={onDraftChange}
         onEntriesChange={onEntriesChange}
