@@ -20,6 +20,7 @@ import {
   getActivityColorGroupName,
   getTemperatureColorBands,
   normalizeTemperatureThresholds,
+  saveSettings,
 } from '../utils/settings'
 import { normalizeTag } from '../utils/tags'
 import {
@@ -96,7 +97,7 @@ export function SettingsPage({
 
     const nextEntries = entries.map((entry) => updateEntryActivity(entry, oldTag, nextTag, color))
     const nextDraft = updateEntryActivity(draft, oldTag, nextTag, color)
-    onSettingsChange({
+    commitTagManagerSettings({
       ...settings,
       activityTags: updateActivityTagCatalog(settings.activityTags, oldTag, nextTag, color),
     })
@@ -119,7 +120,7 @@ export function SettingsPage({
       return
     }
 
-    onSettingsChange({
+    commitTagManagerSettings({
       ...settings,
       activityTags: {
         ...settings.activityTags,
@@ -131,7 +132,7 @@ export function SettingsPage({
   }
 
   function updateActivityGroupName(color: string, name: string) {
-    onSettingsChange({
+    commitTagManagerSettings({
       ...settings,
       activityColorGroupNames: {
         ...settings.activityColorGroupNames,
@@ -148,7 +149,7 @@ export function SettingsPage({
 
     const nextEntries = entries.map((entry) => deleteEntryActivity(entry, tag))
     const nextDraft = deleteEntryActivity(draft, tag)
-    onSettingsChange({
+    commitTagManagerSettings({
       ...settings,
       activityTags: deleteActivityTagCatalog(settings.activityTags, tag),
     })
@@ -156,6 +157,11 @@ export function SettingsPage({
     onDraftChange(nextDraft)
     setEditingActivityTag(null)
     onStatusChange(`Deleted activity: ${tag}`)
+  }
+
+  function commitTagManagerSettings(nextSettings: AppSettings) {
+    onSettingsChange(nextSettings)
+    saveSettings(nextSettings)
   }
 
   function applyLocationColor(location: LocationTagItem, color: string) {
@@ -192,6 +198,10 @@ export function SettingsPage({
           <h2>Settings</h2>
           <p>Markdown diary storage and sync provider.</p>
         </div>
+        <button type="button" className="settings-save-button" onClick={onSave}>
+          <Save size={16} />
+          Save Settings
+        </button>
       </div>
 
       <div className="settings-body">
@@ -552,12 +562,6 @@ export function SettingsPage({
         />
       )}
 
-      <div className="settings-actions">
-        <button type="button" onClick={onSave}>
-          <Save size={16} />
-          Save Settings
-        </button>
-      </div>
       </div>
     </section>
   )

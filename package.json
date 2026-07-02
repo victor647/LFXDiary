@@ -6,7 +6,11 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "browser:dev": "vite --host 127.0.0.1 --port 5173 --strictPort --open",
+    "browser:start": "node scripts/start-browser-dev.cjs",
+    "browser:stop": "node scripts/stop-browser-dev.cjs",
     "build": "tsc -b && vite build",
+    "nas:build": "npm run build && node scripts/prepare-nas-dist.cjs",
     "desktop:dev": "concurrently -k \"npm:dev\" \"npm:electron:dev\"",
     "electron:dev": "wait-on http://localhost:5173 && electron .",
     "desktop:pack": "npm run desktop:pack:win",

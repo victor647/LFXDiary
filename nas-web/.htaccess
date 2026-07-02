@@ -1,0 +1,8 @@
+RewriteEngine On
+
+RewriteRule ^nas-lan-api/(.*)$ nas-proxy.php?_lfx_mode=lan&_lfx_path=$1 [QSA,L]
+RewriteRule ^nas-public-api/(.*)$ nas-proxy.php?_lfx_mode=public&_lfx_path=$1 [QSA,L]
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>

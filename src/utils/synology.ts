@@ -14,6 +14,7 @@ import {
   getEntryMarkdownFolder,
   getEntryNasMarkdownFileName,
 } from './files'
+import { getRuntimeNasProxyBasePath, getRuntimeNasProxyMode } from './runtimeConfig'
 import { getActiveNasUrl } from './settings'
 
 type SynologyResponse<T = unknown> = {
@@ -158,14 +159,24 @@ export function getSynologyDisplayUrl(settings: AppSettings): string {
 
 function getSynologyApiBaseUrl(settings: AppSettings): string {
   if (usesSynologyProxy())
-    return settings.nasMode === 'lan' ? `${window.location.origin}/nas-lan-api/` : `${window.location.origin}/nas-public-api/`
+    return new URL(getRuntimeNasProxyBasePath(settings.nasMode), window.location.href).toString()
 
   return getActiveNasUrl(settings)
 }
 
 function usesSynologyProxy(): boolean {
-  return typeof window !== 'undefined'
-    && (window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname))
+  if (typeof window === 'undefined')
+    return false
+
+  const proxyMode = getRuntimeNasProxyMode()
+
+  if (proxyMode === 'same-origin')
+    return true
+
+  if (proxyMode === 'direct')
+    return false
+
+  return window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname)
 }
 
 async function loginToSynology(baseUrl: string, username: string, password: string): Promise<SynologySession> {

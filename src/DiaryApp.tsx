@@ -4,6 +4,7 @@ import { EntryEditor } from './components/EntryEditor'
 import { ForcePushDialog } from './components/ForcePushDialog'
 import { MetadataEditor } from './components/MetadataEditor'
 import { PullConflictDialog } from './components/PullConflictDialog'
+import { PushSuccessDialog } from './components/PushSuccessDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { SyncErrorDialog } from './components/SyncErrorDialog'
@@ -76,6 +77,7 @@ export function DiaryApp() {
   const [pendingDeleteEntry, setPendingDeleteEntry] = useState<DiaryEntry | null>(null)
   const [pendingForcePushMonth, setPendingForcePushMonth] = useState<string | null>(null)
   const [pendingPullReview, setPendingPullReview] = useState<PendingPullReview | null>(null)
+  const [pushedDiaryDates, setPushedDiaryDates] = useState<string[] | null>(null)
   const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([String(new Date().getFullYear())]))
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set([getNotebookKey(toDateInputValue(new Date()))]))
 
@@ -376,6 +378,7 @@ export function DiaryApp() {
 
       setDraft(pushedDraft)
       setEntries((current) => upsertEntries(current, pushedEntries))
+      setPushedDiaryDates(pushedEntries.map((entry) => entry.diaryDate))
       setStatusMessage(
         `${isForcePush ? 'Force pushed' : 'Pushed'} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} from ${targetNotebook} to ${destination}`,
       )
@@ -688,6 +691,12 @@ export function DiaryApp() {
           }}
           onUseLocal={() => resolvePullConflict(false)}
           onUseCloud={() => resolvePullConflict(true)}
+        />
+      )}
+      {pushedDiaryDates && (
+        <PushSuccessDialog
+          diaryDates={pushedDiaryDates}
+          onClose={() => setPushedDiaryDates(null)}
         />
       )}
       {syncErrorLog && <SyncErrorDialog log={syncErrorLog} onClose={() => setSyncErrorLog(null)} />}

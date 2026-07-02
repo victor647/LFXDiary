@@ -415,7 +415,7 @@ label {
 }
 
 .settings-header {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
 }
 
@@ -438,6 +438,20 @@ label {
 .settings-back-button {
   min-width: 76px;
   padding: 0 10px;
+}
+
+.settings-save-button {
+  min-width: 140px;
+  background: #1d3557;
+  border-color: #1d3557;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.settings-save-button:hover {
+  background: #27496f;
+  border-color: #27496f;
+  color: #ffffff;
 }
 
 .settings-section {
@@ -665,26 +679,6 @@ label {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
-}
-
-.settings-actions {
-  display: flex;
-  max-width: 680px;
-  justify-content: flex-end;
-}
-
-.settings-actions button {
-  min-width: 140px;
-  background: #1d3557;
-  border-color: #1d3557;
-  color: #ffffff;
-  font-weight: 700;
-}
-
-.settings-actions button:hover {
-  background: #27496f;
-  border-color: #27496f;
-  color: #ffffff;
 }
 
 .metadata-deck {
@@ -1070,6 +1064,7 @@ label {
 .activity-dialog,
 .delete-entry-dialog,
 .force-push-dialog,
+.push-success-dialog,
 .sync-error-dialog,
 .pull-conflict-dialog {
   display: grid;
@@ -1094,9 +1089,25 @@ label {
 
 .delete-entry-dialog p,
 .force-push-dialog p,
+.push-success-dialog p,
 .pull-conflict-dialog p {
   margin: 0;
   color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.push-success-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(320px, calc(100vh - 220px));
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px 8px 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--text-strong);
   font-size: 13px;
   line-height: 1.45;
 }
