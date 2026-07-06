@@ -47,6 +47,7 @@ export function WeatherPanel({
     () => getTemperatureColorBands(settings.temperatureThresholds),
     [settings.temperatureThresholds],
   )
+  const currentTime = new Date()
 
   useEffect(() => {
     const validCityIds = new Set(draft.cities.map((city) => city.id))
@@ -73,12 +74,12 @@ export function WeatherPanel({
 
     Promise.all(
       periodConfig.map((config) =>
-        fetchWeatherSample(draft.diaryDate, DEFAULT_CITY, config.period, config.sampleTime),
+        fetchWeatherSample(draft.diaryDate, DEFAULT_CITY, config.period, config.sampleTime, settings),
       ),
     )
       .then((samples) => {
         onUpdateDraftIfCurrent(entryId, diaryDate, { ...getDailyWeatherFields(samples), weatherSamples: samples })
-        onStatusChange('Default Hangzhou weather updated')
+        onStatusChange(formatWeatherFetchedStatus(samples))
       })
       .catch((error) => {
         onStatusChange('Default weather fetch failed. You can fetch it manually.')
@@ -90,7 +91,7 @@ export function WeatherPanel({
           }),
         )
       })
-  }, [draft, onErrorLog, onStatusChange, onUpdateDraftIfCurrent])
+  }, [draft, onErrorLog, onStatusChange, onUpdateDraftIfCurrent, settings])
 
   async function updateWeatherPeriodCity(period: Period, cityId: string) {
     const previousWeatherCityByPeriod = weatherCityByPeriod
@@ -116,11 +117,11 @@ export function WeatherPanel({
     try {
       const entryId = draft.id
       const diaryDate = draft.diaryDate
-      const sample = await fetchWeatherSample(draft.diaryDate, city, config.period, config.sampleTime)
+      const sample = await fetchWeatherSample(draft.diaryDate, city, config.period, config.sampleTime, settings)
       const weatherSamples = upsertWeatherSample(draft.weatherSamples, sample)
 
       onUpdateDraftIfCurrent(entryId, diaryDate, { ...getDailyWeatherFields(weatherSamples), weatherSamples })
-      onStatusChange(`${config.label} weather updated`)
+      onStatusChange(formatWeatherFetchedStatus([sample]))
     } catch (error) {
       setWeatherCityByPeriod(previousWeatherCityByPeriod)
       onStatusChange(`${config.label} weather fetch failed. Existing weather data was kept.`)
@@ -162,7 +163,7 @@ export function WeatherPanel({
             throw new Error(`Missing city for ${config.label}`)
 
           try {
-            return await fetchWeatherSample(draft.diaryDate, city, config.period, config.sampleTime)
+            return await fetchWeatherSample(draft.diaryDate, city, config.period, config.sampleTime, settings)
           } catch (error) {
             throw createWeatherAttemptError(error, config.period, config.label, config.sampleTime, city)
           }
@@ -170,7 +171,7 @@ export function WeatherPanel({
       )
 
       onUpdateDraftIfCurrent(entryId, diaryDate, { ...getDailyWeatherFields(samples), weatherSamples: samples })
-      onStatusChange('Weather updated')
+      onStatusChange(formatWeatherFetchedStatus(samples))
     } catch (error) {
       const attempt = getWeatherAttempt(error)
       onStatusChange('Weather fetch failed. You can try again later.')
@@ -231,7 +232,7 @@ export function WeatherPanel({
               style={getTemperatureCardStyle(draft.weatherSamples, config.period, temperatureColorBands)}
             >
               <div className="temperature-card-heading">
-                <span>{config.label}</span>
+                <span>{formatPeriodLabel(draft.diaryDate, config.label, config.sampleTime, currentTime)}</span>
                 <span
                   className="weather-humidity-pill"
                   style={getHumidityStyle(draft.weatherSamples, config.period)}
@@ -331,6 +332,24 @@ function getWeatherAttempt(error: unknown): WeatherAttempt | undefined {
     return undefined
 
   return (error as WeatherAttemptError).weatherAttempt
+}
+
+function formatWeatherFetchedStatus(samples: WeatherSample[]): string {
+  const sources = Array.from(new Set(samples.map((sample) => sample.source).filter(Boolean)))
+  const source = sources.length ? sources.join(' / ') : 'unknown source'
+
+  return `Weather fetched from ${source}`
+}
+
+function formatPeriodLabel(
+  diaryDate: string,
+  label: string,
+  sampleTime: WeatherSample['sampleTime'],
+  currentTime: Date,
+): string {
+  const sampleDateTime = new Date(`${diaryDate}T${sampleTime}:00`)
+
+  return sampleDateTime > currentTime ? `${label} Forecast` : label
 }
 
 function getWeatherCityByPeriod(entry: DiaryEntry): Record<Period, string> {

@@ -1,7 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const projectRoot = path.resolve(__dirname, '..')
+const projectRoot = path.resolve(__dirname, '..', '..')
 const distDir = path.join(projectRoot, 'dist')
 const nasWebDir = path.join(projectRoot, 'nas-web')
 

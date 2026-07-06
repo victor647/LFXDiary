@@ -1,4 +1,7 @@
 import type { City, GeocodingResult } from '../domain/types'
+import { formatCityDisplayName } from '../domain/city'
+
+export { formatCityDisplayName }
 
 export async function searchCitiesByName(query: string, count = 8): Promise<City[]> {
   const trimmed = query.trim()
@@ -33,8 +36,4 @@ export function formatCityListDisplay(cities: City[]): string {
     return 'Not set'
 
   return cities.map(formatCityDisplayName).join(' - ')
-}
-
-export function formatCityDisplayName(city: City): string {
-  return city.name.split(',')[0].trim() || city.name
 }

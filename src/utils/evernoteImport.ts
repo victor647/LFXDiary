@@ -3,14 +3,15 @@ import {
   DEFAULT_TAG_COLOR,
   LOCATION_COLOR_PALETTE,
   MAX_ACTIVITIES_PER_ENTRY,
+  MAX_PEOPLE_PER_ENTRY,
   periodConfig,
 } from '../domain/constants'
 import type { AppSettings, City, DiaryEntry, MoodScore, RecentTag } from '../domain/types'
 import { formatCityDisplayName, searchCitiesByName } from './city'
 import { getDailyWeatherFields } from './diaryEntryHelpers'
-import { getRecentCities, getRecentTags, normalizeLocationColors } from './entries'
+import { getRecentCities, getRecentPeople, getRecentTags, normalizeLocationColors } from './entries'
 import { normalizeSettings } from './settings'
-import { normalizeTag, normalizeTags } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizeTag, normalizeTags } from './tags'
 import { fetchWeatherSample } from './weather'
 
 export type EvernoteImportDraft = {
@@ -31,6 +32,7 @@ export type EvernoteImportResult = {
   entry: DiaryEntry
   settings: AppSettings
   addedTags: string[]
+  addedPeople: string[]
   matchedTags: string[]
   weatherFetched: boolean
 }
@@ -143,8 +145,9 @@ export async function createDiaryEntryFromEvernoteImport(
 ): Promise<EvernoteImportResult> {
   const cities = await resolveImportedCities(draft.locationNames, entries)
   const tagsResult = resolveImportedTags(draft.summaryItems, entries, settings)
+  const peopleResult = resolveImportedPeople(draft.content, entries, settings)
   const now = new Date().toISOString()
-  const weatherSamples = await fetchImportedWeather(draft.diaryDate, cities).catch(() => [])
+  const weatherSamples = await fetchImportedWeather(draft.diaryDate, cities, settings).catch(() => [])
   const dailyWeatherFields = weatherSamples.length
     ? getDailyWeatherFields(weatherSamples)
     : {
@@ -156,6 +159,10 @@ export async function createDiaryEntryFromEvernoteImport(
   const tagColors = Object.fromEntries(
     tagsResult.tags.map((tag) => [tag, addedTagSet.has(tag) ? DEFAULT_TAG_COLOR : tagsResult.tagColors[tag] ?? DEFAULT_TAG_COLOR]),
   )
+  const addedPeopleSet = new Set(peopleResult.addedPeople)
+  const personColors = Object.fromEntries(
+    peopleResult.people.map((person) => [person, addedPeopleSet.has(person) ? DEFAULT_TAG_COLOR : peopleResult.personColors[person] ?? DEFAULT_TAG_COLOR]),
+  )
   const entry: DiaryEntry = {
     id: crypto.randomUUID(),
     diaryDate: draft.diaryDate,
@@ -166,6 +173,8 @@ export async function createDiaryEntryFromEvernoteImport(
     mood: draft.mood,
     tags: tagsResult.tags,
     tagColors,
+    people: peopleResult.people,
+    personColors,
     content: draft.content,
     createdAt: now,
     updatedAt: now,
@@ -179,12 +188,17 @@ export async function createDiaryEntryFromEvernoteImport(
       ...settings.activityTags,
       ...Object.fromEntries(tagsResult.addedTags.map((tag) => [tag, { color: DEFAULT_TAG_COLOR }])),
     },
+    peopleTags: {
+      ...settings.peopleTags,
+      ...Object.fromEntries(peopleResult.addedPeople.map((person) => [person, { color: DEFAULT_TAG_COLOR }])),
+    },
   })
 
   return {
     entry,
     settings: nextSettings,
     addedTags: tagsResult.addedTags,
+    addedPeople: peopleResult.addedPeople,
     matchedTags: tagsResult.matchedTags,
     weatherFetched: weatherSamples.length === periodConfig.length,
   }
@@ -329,7 +343,7 @@ function dedupeCities(cities: City[]): City[] {
   return Array.from(new Map(cities.map((city) => [city.id, city])).values())
 }
 
-async function fetchImportedWeather(diaryDate: string, cities: City[]) {
+async function fetchImportedWeather(diaryDate: string, cities: City[], settings: AppSettings) {
   const cityByPeriod = new Map(periodConfig.map((config) => {
     const city = config.period === 'morning' ? cities[0] : cities[1] ?? cities[0]
 
@@ -343,7 +357,7 @@ async function fetchImportedWeather(diaryDate: string, cities: City[]) {
       if (!city)
         throw new Error(`Missing weather location for ${config.label}`)
 
-      return fetchWeatherSample(diaryDate, city, config.period, config.sampleTime)
+      return fetchWeatherSample(diaryDate, city, config.period, config.sampleTime, settings)
     }),
   )
 }
@@ -393,6 +407,36 @@ function resolveImportedTags(summaryItems: string[], entries: DiaryEntry[], sett
   }
 }
 
+function resolveImportedPeople(content: string, entries: DiaryEntry[], settings: AppSettings) {
+  const existingPeople = getExistingPeopleTags(entries, settings)
+  const people: string[] = []
+  const addedPeople: string[] = []
+  const personColors: Record<string, string> = {}
+
+  for (const rawPerson of extractChinesePeopleFromEnglishText(content)) {
+    const person = normalizePersonTag(rawPerson)
+
+    if (!person)
+      continue
+
+    const match = existingPeople.find((tag) => normalizePersonTag(tag.name) === person)
+    personColors[person] = match?.color ?? DEFAULT_TAG_COLOR
+
+    if (!match)
+      addedPeople.push(person)
+
+    people.push(person)
+  }
+
+  const normalizedPeople = normalizePersonTags(people).slice(0, MAX_PEOPLE_PER_ENTRY)
+
+  return {
+    people: normalizedPeople,
+    addedPeople: normalizePersonTags(addedPeople).filter((person) => normalizedPeople.includes(person)),
+    personColors,
+  }
+}
+
 function getExistingActivityTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
   const tags = new Map<string, string>()
 
@@ -403,6 +447,33 @@ function getExistingActivityTags(entries: DiaryEntry[], settings: AppSettings): 
     tags.set(name, tag.color)
 
   return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+}
+
+function getExistingPeopleTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
+  const tags = new Map<string, string>()
+
+  for (const tag of getRecentPeople(entries))
+    tags.set(tag.name, tag.color)
+
+  for (const [name, tag] of Object.entries(settings.peopleTags))
+    tags.set(name, tag.color)
+
+  return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+}
+
+function extractChinesePeopleFromEnglishText(content: string): string[] {
+  const people = new Set<string>()
+  const paragraphs = content.split(/\n{1,}/)
+
+  for (const paragraph of paragraphs) {
+    if (!/[a-zA-Z]/.test(paragraph))
+      continue
+
+    for (const match of paragraph.matchAll(/(?<![\u3400-\u9fff])[\u3400-\u9fff]{2,3}(?![\u3400-\u9fff])/g))
+      people.add(match[0])
+  }
+
+  return Array.from(people)
 }
 
 function findBestActivityTag(rawItem: string, tags: RecentTag[]): RecentTag | null {

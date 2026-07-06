@@ -7,17 +7,17 @@
   "scripts": {
     "dev": "vite",
     "browser:dev": "vite --host 127.0.0.1 --port 5173 --strictPort --open",
-    "browser:start": "node scripts/start-browser-dev.cjs",
-    "browser:stop": "node scripts/stop-browser-dev.cjs",
+    "browser:start": "node packaging/scripts/start-browser-dev.cjs",
+    "browser:stop": "node packaging/scripts/stop-browser-dev.cjs",
     "build": "tsc -b && vite build",
-    "nas:build": "npm run build && node scripts/prepare-nas-dist.cjs",
+    "nas:build": "npm run build && node packaging/scripts/prepare-nas-dist.cjs",
     "desktop:dev": "concurrently -k \"npm:dev\" \"npm:electron:dev\"",
     "electron:dev": "wait-on http://localhost:5173 && electron .",
     "desktop:pack": "npm run desktop:pack:win",
-    "desktop:pack:win": "npm run build && electron-builder --dir --win --config.directories.output=%LOCALAPPDATA%\\LFXDiary\\release",
+    "desktop:pack:win": "npm run build && electron-builder --dir --win --config.directories.output=dist",
     "desktop:pack:mac": "npm run build && electron-builder --dir --mac --x64",
     "desktop:dist": "npm run desktop:dist:win",
-    "desktop:dist:win": "npm run build && electron-builder --win --config.directories.output=%LOCALAPPDATA%\\LFXDiary\\release",
+    "desktop:dist:win": "npm run build && electron-builder --win --config.directories.output=dist",
     "desktop:dist:mac": "npm run build && electron-builder --mac --x64",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -41,6 +41,11 @@
         "nsis",
         "zip"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "packaging/build/installer.nsh"
     },
     "mac": {
       "target": [

@@ -1,6 +1,6 @@
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, weatherCodeText } from './constants'
+import { normalizePersonTag, normalizeTag } from './tags'
 import type { City, DiaryCatalog, DiaryEntry } from './types'
-import { normalizeTag } from '../utils/tags'
 import { getCityCatalogKey, isCity } from './metadata/locationMetadata'
 
 export const DIARY_CATALOG_FILE_NAME = 'lfx-diary-catalog.json'
@@ -9,6 +9,7 @@ export const WEATHER_CODES_FILE_NAME = 'weather-codes.json'
 export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   const locations = new Map<string, { city: City; color: string }>()
   const activities = new Map<string, { name: string; color: string }>()
+  const people = new Map<string, { name: string; color: string }>()
 
   locations.set(getCityCatalogKey(DEFAULT_CITY), {
     city: DEFAULT_CITY,
@@ -34,6 +35,18 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
         color: entry.tagColors[normalizedTag] ?? DEFAULT_TAG_COLOR,
       })
     }
+
+    for (const person of entry.people ?? []) {
+      const normalizedPerson = normalizePersonTag(person)
+
+      if (!normalizedPerson)
+        continue
+
+      people.set(normalizedPerson, {
+        name: normalizedPerson,
+        color: entry.personColors?.[normalizedPerson] ?? DEFAULT_TAG_COLOR,
+      })
+    }
   }
 
   return {
@@ -48,6 +61,11 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
       Array.from(activities.values())
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((activity) => [activity.name, { color: activity.color }]),
+    ),
+    people: Object.fromEntries(
+      Array.from(people.values())
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((person) => [person.name, { color: person.color }]),
     ),
   }
 }
@@ -72,6 +90,7 @@ export function deserializeDiaryCatalog(raw: string): DiaryCatalog | null {
       updatedAt: typeof catalog.updatedAt === 'string' ? catalog.updatedAt : new Date().toISOString(),
       locations: normalizeCatalogLocations(catalog.locations),
       activities: normalizeCatalogActivities(catalog.activities),
+      people: normalizeCatalogActivities(catalog.people),
     }
   } catch {
     return null

@@ -1,4 +1,4 @@
-import { formatDiaryDate } from '../../utils/date'
+import { formatDiaryDate } from '../date'
 import type { DiaryEntry } from '../types'
 
 export function serializeDateMetadata(entry: DiaryEntry): string {

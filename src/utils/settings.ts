@@ -29,8 +29,15 @@ export const defaultSettings: AppSettings = {
   gitAuthorEmail: '',
   gitDiaryPath: DEFAULT_GIT_DIARY_PATH,
   gitCorsProxy: '',
+  birthDate: '',
+  aqicnToken: '',
+  aliyunAirAppCode: '',
+  aliyunAirAppKey: '',
+  aliyunAirAppSecret: '',
   activityColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
   activityTags: {},
+  personColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
+  peopleTags: {},
   temperatureThresholds: DEFAULT_TEMPERATURE_THRESHOLDS,
 }
 
@@ -78,8 +85,15 @@ export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     gitAuthorEmail: settings.gitAuthorEmail?.trim() ?? '',
     gitDiaryPath: normalizeGitPath(settings.gitDiaryPath || DEFAULT_GIT_DIARY_PATH),
     gitCorsProxy: normalizeOptionalUrl(settings.gitCorsProxy ?? ''),
+    birthDate: normalizeBirthDate(settings.birthDate ?? ''),
+    aqicnToken: settings.aqicnToken?.trim() ?? '',
+    aliyunAirAppCode: settings.aliyunAirAppCode?.trim() ?? '',
+    aliyunAirAppKey: settings.aliyunAirAppKey?.trim() ?? '',
+    aliyunAirAppSecret: settings.aliyunAirAppSecret?.trim() ?? '',
     activityColorGroupNames: normalizeActivityColorGroupNames(settings.activityColorGroupNames ?? {}),
     activityTags: normalizeActivityTags(settings.activityTags ?? {}),
+    personColorGroupNames: normalizeActivityColorGroupNames(settings.personColorGroupNames ?? settings.activityColorGroupNames ?? {}),
+    peopleTags: normalizeActivityTags(settings.peopleTags ?? {}),
     temperatureThresholds: normalizeTemperatureThresholds(settings.temperatureThresholds ?? getLegacyTemperatureThresholds(legacySettings.temperatureColorBands)),
   }
 }
@@ -90,6 +104,10 @@ export function getActiveNasUrl(settings: AppSettings): string {
 
 export function getActivityColorGroupName(settings: AppSettings, color: string): string {
   return settings.activityColorGroupNames[color] || DEFAULT_ACTIVITY_COLOR_GROUP_NAMES[color] || color
+}
+
+export function getPersonColorGroupName(settings: AppSettings, color: string): string {
+  return settings.personColorGroupNames[color] || DEFAULT_ACTIVITY_COLOR_GROUP_NAMES[color] || color
 }
 
 export function getTemperatureColorBands(thresholds: TemperatureThresholds): TemperatureColorBand[] {
@@ -157,6 +175,23 @@ function normalizeOptionalUrl(value: string): string {
     return ''
 
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+}
+
+function normalizeBirthDate(value: string): string {
+  const trimmed = value.trim()
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed))
+    return ''
+
+  const date = new Date(`${trimmed}T12:00:00`)
+
+  if (Number.isNaN(date.getTime()))
+    return ''
+
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+
+  return date > today ? '' : trimmed
 }
 
 function normalizeActivityColorGroupNames(names: Record<string, string>): Record<string, string> {

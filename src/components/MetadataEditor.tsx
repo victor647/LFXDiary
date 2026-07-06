@@ -3,6 +3,7 @@ import { ActivitiesPanel } from './panels/ActivitiesPanel'
 import { DatePanel } from './panels/DatePanel'
 import { LocationPanel } from './panels/LocationPanel'
 import { MoodPanel } from './panels/MoodPanel'
+import { PeoplePanel } from './panels/PeoplePanel'
 import { WeatherPanel } from './panels/WeatherPanel'
 
 type MetadataEditorProps = {
@@ -32,7 +33,7 @@ export function MetadataEditor({
 }: MetadataEditorProps) {
   return (
     <section className="metadata-deck">
-      <DatePanel draft={draft} onUpdateDraft={onUpdateDraft} onStatusChange={onStatusChange} />
+      <DatePanel draft={draft} settings={settings} onUpdateDraft={onUpdateDraft} onStatusChange={onStatusChange} />
       <LocationPanel
         draft={draft}
         entries={entries}
@@ -50,6 +51,16 @@ export function MetadataEditor({
         onErrorLog={onErrorLog}
       />
       <ActivitiesPanel
+        draft={draft}
+        entries={entries}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        onUpdateDraft={onUpdateDraft}
+        onDraftChange={onDraftChange}
+        onEntriesChange={onEntriesChange}
+        onStatusChange={onStatusChange}
+      />
+      <PeoplePanel
         draft={draft}
         entries={entries}
         settings={settings}

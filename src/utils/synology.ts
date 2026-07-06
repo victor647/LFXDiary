@@ -43,6 +43,8 @@ type SynologyListData = {
   files?: SynologyListFile[]
 }
 
+const SYNC_REQUEST_TIMEOUT_MS = 10000
+
 export class SynologySyncError extends Error {
   phase: string
   endpoint: string
@@ -407,8 +409,11 @@ function getEntryMarkdownPath(baseFolder: string, entry: DiaryEntry): string {
 }
 
 async function fetchSynology(url: URL, init: RequestInit, phase: string): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), SYNC_REQUEST_TIMEOUT_MS)
+
   try {
-    return await fetch(url, init)
+    return await fetch(url, { ...init, signal: controller.signal })
   } catch (error) {
     throw new SynologySyncError(
       getFetchFailureMessage(error),
@@ -417,6 +422,8 @@ async function fetchSynology(url: URL, init: RequestInit, phase: string): Promis
       undefined,
       error instanceof Error ? error.message : String(error),
     )
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
@@ -435,6 +442,12 @@ async function parseSynologyResponse<T>(response: Response, phase: string, endpo
 }
 
 function getFetchFailureMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'AbortError')
+    return 'Network request timed out after 10 seconds.'
+
+  if (error instanceof Error && error.name === 'AbortError')
+    return 'Network request timed out after 10 seconds.'
+
   if (error instanceof TypeError)
     return 'Network request failed. This is commonly caused by CORS, TLS/certificate errors, or an unreachable NAS endpoint.'
 

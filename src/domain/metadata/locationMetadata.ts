@@ -1,6 +1,6 @@
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR } from '../constants'
+import { formatCityDisplayName } from '../city'
 import type { City, DiaryCatalog, DiaryEntry } from '../types'
-import { formatCityDisplayName } from '../../utils/city'
 
 export function serializeLocationMetadata(entry: DiaryEntry): string {
   return `Location: ${formatLocationIds(entry.cities)}`

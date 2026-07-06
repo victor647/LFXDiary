@@ -1,22 +1,25 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRef } from 'react'
-import type { DiaryEntry } from '../../domain/types'
+import type { AppSettings, DiaryEntry } from '../../domain/types'
 import { formatDiaryDate, toDateInputValue } from '../../utils/date'
 
 type DatePanelProps = {
   draft: DiaryEntry
+  settings: AppSettings
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onStatusChange: (message: string) => void
 }
 
 export function DatePanel({
   draft,
+  settings,
   onUpdateDraft,
   onStatusChange,
 }: DatePanelProps) {
   const datePickerRef = useRef<HTMLInputElement>(null)
   const maxDate = toDateInputValue(new Date())
   const isNextDayDisabled = draft.diaryDate >= maxDate
+  const daysFromBirth = getInclusiveDayCount(settings.birthDate, draft.diaryDate)
 
   function updateDiaryDate(value: string) {
     if (!value)
@@ -73,6 +76,9 @@ export function DatePanel({
             onClick={openDatePicker}
             aria-label="Selected date"
           />
+          <div className="date-birth-counter" title={daysFromBirth ? `Days from birth: ${daysFromBirth}` : 'Days from birth'}>
+            Days from birth: {daysFromBirth ?? '--'}
+          </div>
           <div className="date-step-buttons">
             <button type="button" onClick={() => shiftDiaryDate(-1)} title="Previous day">
               <ChevronLeft size={14} />
@@ -107,6 +113,35 @@ export function DatePanel({
       </div>
     </div>
   )
+}
+
+function getInclusiveDayCount(startDate: string | undefined, endDate: string | undefined): number | null {
+  const start = parseDateValue(startDate)
+  const end = parseDateValue(endDate)
+
+  if (start === null || end === null)
+    return null
+
+  const dayCount = Math.floor((end - start) / 86400000) + 1
+  return Math.max(0, dayCount)
+}
+
+function parseDateValue(value: string | undefined): number | null {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+
+  if (!match)
+    return null
+
+  const year = Number.parseInt(match[1], 10)
+  const month = Number.parseInt(match[2], 10)
+  const day = Number.parseInt(match[3], 10)
+  const timestamp = Date.UTC(year, month - 1, day)
+  const date = new Date(timestamp)
+
+  if (!Number.isFinite(timestamp) || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day)
+    return null
+
+  return timestamp
 }
 
 function formatTimestamp(value: string): string {

@@ -1,6 +1,6 @@
 import LightningFS from '@isomorphic-git/lightning-fs'
 import * as git from 'isomorphic-git'
-import http from 'isomorphic-git/http/web'
+import type { GitHttpRequest, GitHttpResponse } from 'isomorphic-git/http/web'
 import type { AppSettings, DiaryEntry } from '../domain/types'
 import {
   DIARY_CATALOG_FILE_NAME,
@@ -19,8 +19,13 @@ import {
 
 const gitFsName = 'lfx-diary-git-v1'
 const repoDir = '/repo'
+const GIT_REQUEST_TIMEOUT_MS = 10000
 
 let gitFs: LightningFS | null = null
+
+const gitHttp = {
+  request: requestGitHttp,
+}
 
 export class GitSyncError extends Error {
   operation: string
@@ -72,7 +77,7 @@ export async function pushEntriesToGit(entries: DiaryEntry[], settings: AppSetti
   await runGitOperation('push', () =>
     git.push({
       fs,
-      http,
+      http: gitHttp,
       dir: repoDir,
       remote: 'origin',
       ref: settings.gitBranch,
@@ -126,7 +131,7 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
   await runGitOperation('push', () =>
     git.push({
       fs,
-      http,
+      http: gitHttp,
       dir: repoDir,
       remote: 'origin',
       ref: settings.gitBranch,
@@ -161,7 +166,7 @@ async function ensureGitRepository(settings: AppSettings): Promise<LightningFS> 
     await runGitOperation('clone', () =>
       git.clone({
         fs,
-        http,
+        http: gitHttp,
         dir: repoDir,
         url: settings.gitRemoteUrl,
         ref: settings.gitBranch,
@@ -190,7 +195,7 @@ async function pullGit(fs: LightningFS, settings: AppSettings, allowEmptyRemote:
     await runGitOperation('pull', () =>
       git.pull({
         fs,
-        http,
+        http: gitHttp,
         dir: repoDir,
         ref: settings.gitBranch,
         singleBranch: true,
@@ -263,6 +268,102 @@ async function runGitOperation<T>(operation: string, action: () => Promise<T>): 
       error instanceof Error ? error.message : String(error),
     )
   }
+}
+
+async function requestGitHttp({
+  url,
+  method = 'GET',
+  headers = {},
+  body,
+}: GitHttpRequest): Promise<GitHttpResponse> {
+  const requestBody = body ? await collectGitRequestBody(body) : undefined
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), GIT_REQUEST_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: requestBody ? toArrayBuffer(requestBody) : undefined,
+      signal: controller.signal,
+    })
+    const responseHeaders: Record<string, string> = {}
+
+    for (const [key, value] of response.headers.entries())
+      responseHeaders[key] = value
+
+    return {
+      url: response.url,
+      method,
+      statusCode: response.status,
+      statusMessage: response.statusText,
+      body: response.body ? fromReadableStream(response.body) : fromValue(new Uint8Array(await response.arrayBuffer())),
+      headers: responseHeaders,
+    }
+  } catch (error) {
+    throw new Error(getGitHttpFailureMessage(error))
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function collectGitRequestBody(body: AsyncIterableIterator<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let size = 0
+
+  for await (const chunk of body) {
+    chunks.push(chunk)
+    size += chunk.byteLength
+  }
+
+  const result = new Uint8Array(size)
+  let nextIndex = 0
+
+  for (const chunk of chunks) {
+    result.set(chunk, nextIndex)
+    nextIndex += chunk.byteLength
+  }
+
+  return result
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+
+  return buffer
+}
+
+async function* fromReadableStream(stream: ReadableStream<Uint8Array>): AsyncIterableIterator<Uint8Array> {
+  const reader = stream.getReader()
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+
+      if (done)
+        return
+
+      if (value)
+        yield value
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+async function* fromValue(value: Uint8Array): AsyncIterableIterator<Uint8Array> {
+  yield value
+}
+
+function getGitHttpFailureMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'AbortError')
+    return 'Network request timed out after 10 seconds.'
+
+  if (error instanceof Error && error.name === 'AbortError')
+    return 'Network request timed out after 10 seconds.'
+
+  return error instanceof Error ? error.message : 'Git network request failed.'
 }
 
 async function writeRepoFile(fs: LightningFS, filepath: string, content: string) {

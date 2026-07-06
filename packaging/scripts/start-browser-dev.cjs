@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const net = require('node:net')
 const path = require('node:path')
 
-const projectRoot = path.resolve(__dirname, '..')
+const projectRoot = path.resolve(__dirname, '..', '..')
 const runDir = path.join(projectRoot, '.run')
 const pidFile = path.join(runDir, 'browser-dev.pid')
 const logFile = path.join(runDir, 'browser-dev.log')

@@ -46,7 +46,7 @@ export function formatWeatherErrorLog(error: unknown, context: WeatherErrorLogCo
     lines.push(`Stack:\n${error.stack}`)
 
   lines.push(
-    'Hint: Weather fetch uses Open-Meteo weather and air-quality APIs. Check the network connection, city coordinates/timezone, CORS, and whether the requested date is available from forecast or archive data.',
+    'Hint: Weather fetch uses Open-Meteo weather data plus locally calculated U.S. AQI from raw pollutant concentrations. CNEMC pollutant data is preferred for mainland China dates from today through the previous 13 days, Aliyun pollutant data is used when available, and Open-Meteo pollutant data is the fallback. Check the network connection, city coordinates/timezone, CORS/proxy, tokens, and whether the requested date is available from forecast or archive data.',
   )
 
   return lines.join('\n')

@@ -19,6 +19,18 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/nas-lan-api/, ''),
       },
+      '/aliyun-air-api': {
+        target: 'https://ncairhis.market.alicloudapi.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/aliyun-air-api/, ''),
+      },
+      '/cnemc-air-api': {
+        target: 'https://air.cnemc.cn:18007',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/cnemc-air-api/, ''),
+      },
     },
   },
 })

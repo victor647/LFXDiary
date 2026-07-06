@@ -19,6 +19,7 @@ type ActivityAddButtonProps = {
 type ActivityAddDialogProps = {
   colorNames?: Record<string, string>
   initialColor?: string
+  itemLabel?: string
   onAdd: (name: string, color: string) => void
   onCancel: () => void
 }
@@ -27,6 +28,7 @@ type ActivityEditDialogProps = {
   colorNames?: Record<string, string>
   initialColor: string
   initialName: string
+  itemLabel?: string
   onCancel: () => void
   onDelete: () => void
   onSave: (name: string, color: string) => void
@@ -67,6 +69,7 @@ export function ActivityAddButton({ disabled, onClick, title = 'Add activity' }:
 export function ActivityAddDialog({
   colorNames,
   initialColor = DEFAULT_TAG_COLOR,
+  itemLabel = 'Activity',
   onAdd,
   onCancel,
 }: ActivityAddDialogProps) {
@@ -79,9 +82,9 @@ export function ActivityAddDialog({
 
   return (
     <div className="dialog-backdrop" role="presentation">
-      <div className="activity-dialog" role="dialog" aria-modal="true" aria-label="Add activity">
-        <div className="compact-title">Add Activity</div>
-        <ActivityColorPalette color={color} colorNames={colorNames} label="Activity color" onColorChange={setColor} />
+      <div className="activity-dialog" role="dialog" aria-modal="true" aria-label={`Add ${itemLabel.toLowerCase()}`}>
+        <div className="compact-title">Add {itemLabel}</div>
+        <ActivityColorPalette color={color} colorNames={colorNames} label={`${itemLabel} color`} onColorChange={setColor} />
         <div className="tag-input">
           <input
             value={name}
@@ -109,6 +112,7 @@ export function ActivityEditDialog({
   colorNames,
   initialColor,
   initialName,
+  itemLabel = 'Activity',
   onCancel,
   onDelete,
   onSave,
@@ -122,9 +126,9 @@ export function ActivityEditDialog({
 
   return (
     <div className="dialog-backdrop" role="presentation">
-      <div className="activity-dialog" role="dialog" aria-modal="true" aria-label="Edit activity">
-        <div className="compact-title">Edit Activity</div>
-        <ActivityColorPalette color={color} colorNames={colorNames} label="Activity color" onColorChange={setColor} />
+      <div className="activity-dialog" role="dialog" aria-modal="true" aria-label={`Edit ${itemLabel.toLowerCase()}`}>
+        <div className="compact-title">Edit {itemLabel}</div>
+        <ActivityColorPalette color={color} colorNames={colorNames} label={`${itemLabel} color`} onColorChange={setColor} />
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}

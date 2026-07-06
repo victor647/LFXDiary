@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo.
 echo Diary Book Windows packaging
@@ -27,7 +27,7 @@ if errorlevel 1 goto fail
 echo.
 echo Done.
 echo Output folder:
-echo %LOCALAPPDATA%\LFXDiary\release
+echo %cd%\dist
 echo.
 pause
 exit /b 0

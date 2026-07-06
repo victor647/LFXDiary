@@ -42,6 +42,8 @@ export type DiaryEntry = {
   mood: MoodScore
   tags: string[]
   tagColors: Record<string, string>
+  people: string[]
+  personColors: Record<string, string>
   content: string
   createdAt: string
   updatedAt: string
@@ -104,8 +106,17 @@ export type AppSettings = {
   gitAuthorEmail: string
   gitDiaryPath: string
   gitCorsProxy: string
+  birthDate: string
+  aqicnToken: string
+  aliyunAirAppCode: string
+  aliyunAirAppKey: string
+  aliyunAirAppSecret: string
   activityColorGroupNames: Record<string, string>
   activityTags: Record<string, {
+    color: string
+  }>
+  personColorGroupNames: Record<string, string>
+  peopleTags: Record<string, {
     color: string
   }>
   temperatureThresholds: TemperatureThresholds
@@ -119,6 +130,9 @@ export type DiaryCatalog = {
     color: string
   }>
   activities: Record<string, {
+    color: string
+  }>
+  people: Record<string, {
     color: string
   }>
 }

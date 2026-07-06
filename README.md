@@ -47,6 +47,8 @@ npm run dev
 - Windows/macOS desktop: `npm run desktop:dist:win` or `npm run desktop:dist:mac`.
 - Synology NAS Web Station: `npm run nas:build`, then copy the contents of `dist` to the Web Station site folder.
 
+One-click launch and packaging scripts live in `packaging/`.
+
 For NAS Web Station, use Apache HTTP Server with PHP and make sure URL rewrite is enabled so `dist/.htaccess` can route `/nas-lan-api/` and `/nas-public-api/` to `nas-proxy.php`. The default NAS proxy target for LAN mode is `https://127.0.0.1:5001/`; edit `dist/nas-proxy.config.php` after deployment if your DSM address is different.
 
 ## Validate

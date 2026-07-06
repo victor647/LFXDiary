@@ -383,6 +383,7 @@ label {
   height: 100vh;
   min-height: 0;
   padding: 8px;
+  container-type: inline-size;
 }
 
 .settings-page {
@@ -458,6 +459,60 @@ label {
   max-width: 680px;
 }
 
+.settings-category {
+  max-width: 980px;
+  padding: 6px 2px 0;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.settings-category-personal {
+  order: 10;
+}
+
+.settings-personal-section {
+  order: 11;
+}
+
+.settings-category-sync {
+  order: 20;
+}
+
+.settings-sync-provider-section {
+  order: 21;
+}
+
+.settings-sync-connection-section {
+  order: 22;
+}
+
+.settings-storage-section {
+  order: 23;
+}
+
+.settings-category-tags {
+  order: 30;
+}
+
+.settings-tags-section {
+  order: 31;
+}
+
+.settings-category-weather {
+  order: 40;
+}
+
+.settings-weather-section {
+  order: 41;
+}
+
+.tag-manager-section {
+  max-width: 980px;
+}
+
 .settings-section-title {
   display: flex;
   align-items: center;
@@ -465,6 +520,59 @@ label {
   color: var(--text-strong);
   font-size: 14px;
   font-weight: 700;
+}
+
+.settings-section-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-subsection {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.settings-subsection + .settings-subsection {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-subsection-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tag-manager-clear-button {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: #d7dde6;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tag-manager-clear-button:hover {
+  border-color: #9aa8ba;
+  color: var(--text-strong);
+}
+
+.tag-manager-clear-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tag-manager-clear-button + .tag-manager-clear-button {
+  margin-left: 0;
 }
 
 .settings-mode-control {
@@ -504,7 +612,7 @@ label {
 
 .tag-manager-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -682,18 +790,36 @@ label {
 }
 
 .metadata-deck {
+  position: relative;
+  z-index: 20;
   display: grid;
   grid-template-columns:
-    minmax(180px, 0.65fr)
-    minmax(132px, 0.42fr)
-    minmax(162px, 0.62fr)
-    minmax(360px, 1.36fr)
-    minmax(340px, 1.08fr);
-  grid-template-areas: 'date location activities weather mood';
+    240px
+    162px
+    150px
+    184px;
+  grid-template-areas:
+    'date location activities people'
+    'weather weather mood mood';
   gap: 6px;
   min-height: 0;
   align-items: stretch;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 2px;
+}
+
+@container (min-width: 1514px) {
+  .metadata-deck {
+    grid-template-columns:
+      240px
+      162px
+      150px
+      184px
+      408px
+      340px;
+    grid-template-areas: 'date location activities people weather mood';
+  }
 }
 
 .date-panel {
@@ -709,8 +835,15 @@ label {
   min-width: 360px;
 }
 
-.tag-panel {
+.activities-panel {
   grid-area: activities;
+}
+
+.people-panel {
+  grid-area: people;
+}
+
+.tag-panel {
   min-width: 0;
 }
 
@@ -771,7 +904,7 @@ label {
 
 .activity-recent-popover {
   position: absolute;
-  z-index: 12;
+  z-index: 100;
   top: 32px;
   right: 0;
   display: grid;
@@ -784,6 +917,16 @@ label {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+.activity-recent-popover-floating {
+  position: fixed;
+  z-index: 1000;
+  right: auto;
+}
+
+.activity-recent-popover-floating .activity-color-options {
+  z-index: 1001;
 }
 
 .activity-recent-popover button {
@@ -831,7 +974,7 @@ label {
 
 .activity-color-options {
   position: absolute;
-  z-index: 13;
+  z-index: 101;
   top: 0;
   left: calc(100% + 7px);
   display: grid;
@@ -917,22 +1060,43 @@ label {
 .date-stepper {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px 30px;
+  grid-template-columns: minmax(0, 1fr) 44px 28px;
+  grid-template-areas:
+    'date steps picker'
+    'birth birth birth';
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #ffffff;
 }
 
+.date-birth-counter {
+  display: flex;
+  grid-area: birth;
+  min-width: 0;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 7px;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .date-step-buttons {
   display: grid;
+  grid-area: steps;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   border-left: 1px solid var(--border);
 }
 
 .date-step-buttons button,
 .date-picker-button {
-  min-height: 15px;
+  min-height: 32px;
   border: 0;
   border-radius: 0;
   background: #ffffff;
@@ -949,6 +1113,7 @@ label {
 }
 
 .date-display-input {
+  grid-area: date;
   min-height: 32px;
   padding: 0 8px;
   border: 0;
@@ -960,6 +1125,7 @@ label {
 }
 
 .date-picker-button {
+  grid-area: picker;
   border-left: 1px solid var(--border);
 }
 
@@ -1065,6 +1231,8 @@ label {
 .delete-entry-dialog,
 .force-push-dialog,
 .push-success-dialog,
+.unsaved-close-dialog,
+.sync-progress-dialog,
 .sync-error-dialog,
 .pull-conflict-dialog {
   display: grid;
@@ -1081,6 +1249,40 @@ label {
   width: min(720px, calc(100vw - 32px));
 }
 
+.sync-progress-backdrop {
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.close-confirmation-backdrop {
+  z-index: 70;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.sync-progress-dialog {
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  width: min(360px, calc(100vw - 32px));
+  gap: 12px;
+}
+
+.sync-progress-spinner {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--accent);
+  animation: sync-progress-spin 0.85s linear infinite;
+}
+
+.sync-progress-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
 .pull-conflict-dialog {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   width: min(960px, calc(100vw - 32px));
@@ -1090,11 +1292,19 @@ label {
 .delete-entry-dialog p,
 .force-push-dialog p,
 .push-success-dialog p,
+.unsaved-close-dialog p,
+.sync-progress-dialog p,
 .pull-conflict-dialog p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+@keyframes sync-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .push-success-list {
@@ -1619,6 +1829,8 @@ label {
 }
 
 .entry-body {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -1629,6 +1841,55 @@ label {
 .entry-body label {
   color: var(--text-strong);
   font-size: 14px;
+}
+
+.entry-rich-text-shell {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.entry-rich-text-layer,
+.entry-rich-text-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.entry-rich-text-layer {
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.58;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.entry-rich-text-content {
+  min-height: 100%;
+  white-space: pre-wrap;
+}
+
+.entry-rich-text-input {
+  background: transparent;
+  caret-color: var(--text-strong);
+  color: transparent;
+}
+
+.entry-rich-text-input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.entry-person-token {
+  border-radius: 4px;
 }
 
 .entry-save-button {
@@ -1645,34 +1906,6 @@ label {
   background: #27496f;
   border-color: #27496f;
   color: #ffffff;
-}
-
-@media (max-width: 1500px) {
-  .metadata-deck {
-    grid-template-columns:
-      minmax(180px, 0.8fr)
-      minmax(132px, max-content)
-      minmax(162px, max-content)
-      minmax(0, 1fr)
-      minmax(340px, max-content);
-    grid-template-areas:
-      'date location activities . .'
-      'weather weather weather mood mood';
-  }
-}
-
-@media (max-width: 1200px) {
-  .metadata-deck {
-    grid-template-columns:
-      minmax(132px, max-content)
-      minmax(162px, max-content)
-      repeat(3, minmax(0, 1fr));
-    grid-template-areas:
-      'date date date date date'
-      'location activities . . .'
-      'weather weather weather weather weather'
-      'mood mood mood mood mood';
-  }
 }
 
 @media (max-width: 760px) {
@@ -1695,18 +1928,6 @@ label {
     height: auto;
   }
 
-  .metadata-deck {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'date'
-      'location'
-      'activities'
-      'weather'
-      'mood';
-  }
-
-  .weather-panel,
-  .mood-panel,
   .tag-panel {
     min-width: 0;
   }

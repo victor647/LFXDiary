@@ -1,9 +1,10 @@
 import type { City, DiaryEntry } from '../domain/types'
 import { getDailyWeatherFields, getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 export { getDailyWeatherFields, getWeightedDailyPrecipitationMm }
+import { updateEntryActivity, updateEntryPerson } from '../domain/entryTags'
 import { formatCityDisplayName } from './city'
 import { upsertEntry } from './entries'
-import { normalizeTag, normalizeTags } from './tags'
+export { updateEntryActivity, updateEntryPerson }
 
 export function clampMood(value: number): number {
   if (Number.isNaN(value))
@@ -49,38 +50,6 @@ export function updateEntryLocations(entry: DiaryEntry, locationKey: string, nex
     ...entry,
     cities,
     locationColors,
-    updatedAt: new Date().toISOString(),
-    isEdited: true,
-  }
-}
-
-export function updateEntryActivity(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  const normalizedOldTag = normalizeTag(oldTag)
-  const normalizedNextTag = normalizeTag(nextTag)
-
-  if (!normalizedOldTag || !normalizedNextTag)
-    return entry
-
-  const tagColors = { ...entry.tagColors }
-  let changed = false
-  const tags = entry.tags.map((tag) => {
-    if (normalizeTag(tag) !== normalizedOldTag)
-      return tag
-
-    changed = true
-    delete tagColors[tag]
-    return normalizedNextTag
-  })
-
-  if (!changed)
-    return entry
-
-  tagColors[normalizedNextTag] = color
-
-  return {
-    ...entry,
-    tags: normalizeTags(tags),
-    tagColors,
     updatedAt: new Date().toISOString(),
     isEdited: true,
   }

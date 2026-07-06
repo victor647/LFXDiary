@@ -3,13 +3,14 @@ import {
   DEFAULT_LOCATION_COLOR,
   DEFAULT_TAG_COLOR,
   MAX_ACTIVITIES_PER_ENTRY,
+  MAX_PEOPLE_PER_ENTRY,
   STORAGE_KEY,
   emptyMood,
 } from '../domain/constants'
 import type { City, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
-import { normalizeTag, normalizeTagColors, normalizeTags } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizeTag, normalizeTagColors, normalizeTags } from './tags'
 
 export function makeBlankEntry(): DiaryEntry {
   const now = new Date().toISOString()
@@ -26,6 +27,8 @@ export function makeBlankEntry(): DiaryEntry {
     mood: { ...emptyMood },
     tags: [],
     tagColors: {},
+    people: [],
+    personColors: {},
     content: '',
     createdAt: now,
     updatedAt: now,
@@ -51,6 +54,7 @@ export function loadEntries(): DiaryEntry[] {
 
 export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
   const tags = normalizeTags(entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
+  const people = normalizePersonTags(entry.people ?? []).slice(0, MAX_PEOPLE_PER_ENTRY)
   const weatherSamples = normalizeWeatherSamples(entry.weatherSamples)
   const dailyWeatherCode =
     typeof entry.dailyWeatherCode === 'number'
@@ -73,11 +77,13 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
   return {
     ...entry,
     tags,
+    people,
     dailyWeatherCode,
     dailyWeatherText,
     dailyPrecipitationMm,
     weatherSamples,
     tagColors: normalizeTagColors(entry.tagColors ?? {}, tags),
+    personColors: normalizeTagColors(entry.personColors ?? {}, people, normalizePersonTag),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
     updatedAt,
     savedAt: entry.savedAt ?? updatedAt ?? null,
@@ -202,6 +208,25 @@ export function getRecentTags(entries: DiaryEntry[]): RecentTag[] {
   }
 
   return Array.from(tags.entries())
+    .map(([name, color]) => ({ name, color }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function getRecentPeople(entries: DiaryEntry[]): RecentTag[] {
+  const cutoff = new Date()
+  cutoff.setFullYear(cutoff.getFullYear() - 1)
+  const cutoffDate = toDateInputValue(cutoff)
+  const people = new Map<string, string>()
+
+  for (const entry of entries) {
+    if (entry.diaryDate < cutoffDate)
+      continue
+
+    for (const person of entry.people ?? [])
+      people.set(normalizePersonTag(person), entry.personColors?.[person] ?? DEFAULT_TAG_COLOR)
+  }
+
+  return Array.from(people.entries())
     .map(([name, color]) => ({ name, color }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }

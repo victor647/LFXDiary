@@ -20,6 +20,12 @@ import {
   serializeMoodMetadata,
 } from './metadata/moodMetadata'
 import {
+  deserializePeopleMetadata,
+  getCatalogPersonColorMap,
+  normalizePeopleMetadata,
+  serializePeopleMetadata,
+} from './metadata/peopleMetadata'
+import {
   deserializeWeatherMetadata,
   normalizeWeatherMetadata,
   serializeWeatherMetadata,
@@ -35,6 +41,7 @@ export function serializeDiaryEntryHeader(entry: DiaryEntry): string[] {
     ...serializeWeatherMetadata(entry),
     serializeMoodMetadata(entry),
     serializeActivitiesMetadata(entry),
+    serializePeopleMetadata(entry),
   ]
 }
 
@@ -104,6 +111,7 @@ function deserializeLegacyDiaryEntry(markdown: string, fileName: string, catalog
       ),
       mood: deserializeMoodMetadata(headerLines.find((line) => line.startsWith('Mood:'))),
       tags: deserializeActivitiesMetadata(headerLines.find((line) => line.startsWith('Tags:'))),
+      people: deserializePeopleMetadata(headerLines.find((line) => line.startsWith('People:'))),
       content,
     },
     diaryDate,
@@ -115,6 +123,7 @@ function normalizeDeserializedEntry(entry: Partial<DiaryEntry>, diaryDate: strin
   const now = new Date().toISOString()
   const cities = normalizeDeserializedCities(entry.cities)
   const tags = normalizeActivitiesMetadata(entry.tags)
+  const people = normalizePeopleMetadata(entry.people)
   const weather = normalizeWeatherMetadata(
     entry.dailyWeatherCode,
     entry.dailyWeatherText,
@@ -136,6 +145,8 @@ function normalizeDeserializedEntry(entry: Partial<DiaryEntry>, diaryDate: strin
     mood: normalizeMoodMetadata(entry.mood),
     tags,
     tagColors: normalizeDeserializedColors(entry.tagColors, tags, DEFAULT_TAG_COLOR, getCatalogActivityColorMap(catalog)),
+    people,
+    personColors: normalizeDeserializedColors(entry.personColors, people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
     content: entry.content ?? '',
     createdAt: entry.createdAt || now,
     updatedAt: entry.updatedAt || now,
@@ -184,11 +195,16 @@ function applyCatalogToEntry(entry: DiaryEntry, catalog: DiaryCatalog | undefine
     ...entry.tagColors,
     ...normalizeDeserializedColors({}, entry.tags, DEFAULT_TAG_COLOR, getCatalogActivityColorMap(catalog)),
   }
+  const personColors = {
+    ...entry.personColors,
+    ...normalizeDeserializedColors({}, entry.people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
+  }
 
   return {
     ...entry,
     cities,
     locationColors,
     tagColors,
+    personColors,
   }
 }

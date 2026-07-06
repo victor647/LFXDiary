@@ -1,4 +1,0 @@
-#!/bin/sh
-PROJECT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-cd "$PROJECT_DIR" || exit 1
-exec /usr/bin/env node scripts/start-browser-dev.cjs

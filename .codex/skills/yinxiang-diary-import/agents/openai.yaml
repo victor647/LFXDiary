@@ -1,0 +1,6 @@
+interface:
+  display_name: "Yinxiang Diary Import"
+  short_description: "Export monthly Yinxiang diary notes for LFXDiary"
+  default_prompt: "Use $yinxiang-diary-import to export a Yinxiang diary date range into monthly .notes files."
+policy:
+  allow_implicit_invocation: true

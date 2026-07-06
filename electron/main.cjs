@@ -13,6 +13,8 @@ const isDev = !app.isPackaged
 const NAS_PROXY_TARGETS = {
   '/nas-public-api': 'https://www.lafaxi647.cn:5001',
   '/nas-lan-api': 'https://192.168.0.2:5001',
+  '/aliyun-air-api': 'https://ncairhis.market.alicloudapi.com',
+  '/cnemc-air-api': 'https://air.cnemc.cn:18007',
 }
 
 protocol.registerSchemesAsPrivileged([

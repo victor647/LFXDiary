@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DeleteEntryDialog } from './components/DeleteEntryDialog'
 import { EntryEditor } from './components/EntryEditor'
 import { ForcePushDialog } from './components/ForcePushDialog'
@@ -8,9 +8,12 @@ import { PushSuccessDialog } from './components/PushSuccessDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { SyncErrorDialog } from './components/SyncErrorDialog'
+import { SyncProgressDialog } from './components/SyncProgressDialog'
+import { UnsavedCloseDialog } from './components/UnsavedCloseDialog'
+import { getDiarySyncAdapter } from './application/diarySync'
 import { STORAGE_KEY } from './domain/constants'
 import { serializeDiaryEntryMarkdown } from './domain/diaryEntrySerialization'
-import type { DiaryEntry } from './domain/types'
+import type { AppSettings, DiaryEntry } from './domain/types'
 import { formatDiaryDate, getNotebookKey, getNotebookYear, toDateInputValue } from './utils/date'
 import {
   getNormalizedDailyWeatherFields,
@@ -30,22 +33,10 @@ import { createDiaryEntryFromEvernoteImport, parseEvernoteImportFile } from './u
 import {
   downloadTextFile,
   getEntryMarkdownFileName,
-  getEntryMarkdownFolder,
 } from './utils/files'
-import {
-  deleteEntryFromGit,
-  getGitDisplayTarget,
-  pullEntriesFromGit,
-  pushEntriesToGit,
-} from './utils/gitSync'
 import { loadSettings, normalizeSettings, saveSettings } from './utils/settings'
 import { formatSyncErrorLog } from './utils/syncErrorLog'
-import {
-  deleteEntryFromSynology,
-  downloadEntriesFromSynology,
-  uploadEntriesToSynology,
-} from './utils/synology'
-import { normalizeTagColors, normalizeTags } from './utils/tags'
+import { normalizePersonTag, normalizePersonTags, normalizeTagColors, normalizeTags } from './utils/tags'
 
 type PullConflict = {
   localEntry: DiaryEntry
@@ -58,6 +49,12 @@ type PendingPullReview = {
   resolvedEntries: DiaryEntry[]
   conflicts: PullConflict[]
   index: number
+}
+
+type SyncProgress = {
+  target: string
+  message: string
+  title?: string
 }
 
 export function DiaryApp() {
@@ -78,8 +75,12 @@ export function DiaryApp() {
   const [pendingForcePushMonth, setPendingForcePushMonth] = useState<string | null>(null)
   const [pendingPullReview, setPendingPullReview] = useState<PendingPullReview | null>(null)
   const [pushedDiaryDates, setPushedDiaryDates] = useState<string[] | null>(null)
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
+  const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false)
   const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([String(new Date().getFullYear())]))
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set([getNotebookKey(toDateInputValue(new Date()))]))
+  const allowCloseRef = useRef(false)
+  const hasUnsavedEntriesRef = useRef(false)
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
@@ -100,9 +101,10 @@ export function DiaryApp() {
       const dateText = formatDiaryDate(entry.diaryDate).toLowerCase()
       const cityText = entry.cities.map((city) => city.name).join(' ').toLowerCase()
       const tagText = entry.tags.join(' ').toLowerCase()
+      const peopleText = (entry.people ?? []).join(' ').toLowerCase()
       const contentText = entry.content.toLowerCase()
 
-      return [dateText, cityText, tagText, contentText].some((text) => text.includes(query))
+      return [dateText, cityText, tagText, peopleText, contentText].some((text) => text.includes(query))
     })
   }, [searchQuery, sortedEntries])
 
@@ -119,7 +121,55 @@ export function DiaryApp() {
   const editedEntryCount = useMemo(() => getEditedEntryCount(entries, draft), [draft, entries])
   const unsavedEntryIds = useMemo(() => getUnsavedEntryIds(entries, draft), [draft, entries])
   const unuploadedEntryCount = useMemo(() => getUnuploadedEntryCount(entries, draft), [draft, entries])
+  const richTextPeople = useMemo(() => {
+    const people = new Set<string>()
+    const personColors: Record<string, string> = {}
+
+    for (const rawPerson of draft.people ?? []) {
+      const person = normalizePersonTag(rawPerson)
+
+      if (!person)
+        continue
+
+      const color = getSettingsPersonColor(settings, person) ?? draft.personColors?.[person]
+
+      people.add(person)
+
+      if (color)
+        personColors[person] = color
+    }
+
+    return {
+      people: Array.from(people),
+      personColors,
+    }
+  }, [draft.people, draft.personColors, settings])
+  const hasUnsavedEntries = isDraftDirty || unsavedEntryIds.size > 0
+  const closeUnsavedCount = hasUnsavedEntries ? Math.max(1, unsavedEntryIds.size) : 0
   const sidebarStatusMessage = getSidebarStatusMessage(unsavedEntryIds.size, unuploadedEntryCount) ?? statusMessage
+
+  useEffect(() => {
+    setDraft((current) => syncEntryPersonColors(current, settings))
+  }, [draft.id, settings])
+
+  useEffect(() => {
+    hasUnsavedEntriesRef.current = hasUnsavedEntries
+  }, [hasUnsavedEntries])
+
+  useEffect(() => {
+    function confirmBeforeClose(event: BeforeUnloadEvent) {
+      if (allowCloseRef.current || !hasUnsavedEntriesRef.current)
+        return
+
+      event.preventDefault()
+      event.returnValue = ''
+      setPendingCloseConfirmation(true)
+    }
+
+    window.addEventListener('beforeunload', confirmBeforeClose)
+
+    return () => window.removeEventListener('beforeunload', confirmBeforeClose)
+  }, [])
 
   function updateDraft(patch: Partial<DiaryEntry>) {
     setDraft((current) => ({
@@ -169,6 +219,7 @@ export function DiaryApp() {
 
     const nextEntries = Array.from(savedEntries.values())
 
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries))
     setDraft(normalizedDraft)
     setEntries(nextEntries)
     setSelectedNotebook(getNotebookKey(normalizedDraft.diaryDate))
@@ -179,6 +230,21 @@ export function DiaryApp() {
         ? `Saved ${savedCount} edited entries locally. Click Push to upload.`
         : `Saved locally: ${formatDiaryDate(normalizedDraft.diaryDate)}. Click Push to upload.`,
     )
+  }
+
+  function saveAndClose() {
+    saveEditedEntries()
+    closeWindowWithoutPrompt()
+  }
+
+  function discardAndClose() {
+    closeWindowWithoutPrompt()
+  }
+
+  function closeWindowWithoutPrompt() {
+    allowCloseRef.current = true
+    setPendingCloseConfirmation(false)
+    window.setTimeout(() => window.close(), 0)
   }
 
   function getNavigationSaveState(): { savedDraft: DiaryEntry, localEntries: DiaryEntry[], didSave: boolean } {
@@ -218,7 +284,7 @@ export function DiaryApp() {
     if (didSave)
       setEntries(localEntries)
 
-    setDraft(nextEntry)
+    setDraft(syncEntryPersonColors(nextEntry, settings))
 
     if (didSave)
       setStatusMessage(`Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. Opened ${formatDiaryDate(nextEntry.diaryDate)}.`)
@@ -226,7 +292,9 @@ export function DiaryApp() {
 
   async function importEvernoteFile(file: File) {
     try {
-      setStatusMessage(`Importing ${file.name}...`)
+      const importMessage = `Importing ${file.name}...`
+      setStatusMessage(importMessage)
+      setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: importMessage })
       const text = await file.text()
       const parsedFile = parseEvernoteImportFile(text, file.name)
 
@@ -239,9 +307,13 @@ export function DiaryApp() {
       let nextSettings = settings
       const importedEntries: DiaryEntry[] = []
       const addedTags = new Set<string>()
+      const addedPeople = new Set<string>()
       let weatherFailureCount = 0
 
-      for (const importDraft of parsedFile.drafts) {
+      for (const [index, importDraft] of parsedFile.drafts.entries()) {
+        const progressMessage = `Importing ${index + 1} of ${parsedFile.drafts.length} from ${file.name}...`
+        setStatusMessage(progressMessage)
+        setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: progressMessage })
         const result = await createDiaryEntryFromEvernoteImport(importDraft, nextEntries, nextSettings)
 
         nextEntries = upsertEntry(nextEntries, result.entry)
@@ -250,6 +322,9 @@ export function DiaryApp() {
 
         for (const tag of result.addedTags)
           addedTags.add(tag)
+
+        for (const person of result.addedPeople)
+          addedPeople.add(person)
 
         if (!result.weatherFetched)
           weatherFailureCount += 1
@@ -283,6 +358,7 @@ export function DiaryApp() {
           file.name,
           importedEntries.length,
           Array.from(addedTags),
+          Array.from(addedPeople),
           weatherFailureCount,
           parsedFile.encryptedCount,
           parsedFile.unsupportedCount,
@@ -290,6 +366,8 @@ export function DiaryApp() {
       )
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Evernote import failed.')
+    } finally {
+      setSyncProgress(null)
     }
   }
 
@@ -359,22 +437,19 @@ export function DiaryApp() {
   ) {
     try {
       const normalizedSettings = normalizeSettings(settings)
-      const syncTarget = normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'
+      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      const syncTarget = syncAdapter.label
       const action = isForcePush ? 'Force pushing' : 'Pushing'
-      setStatusMessage(`${action} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} to ${syncTarget}...`)
+      const progressMessage = `${action} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} to ${syncTarget}...`
+      setStatusMessage(progressMessage)
+      setSyncProgress({ target: syncTarget, message: progressMessage })
 
-      if (normalizedSettings.syncProvider === 'git')
-        await pushEntriesToGit(entriesToPush, normalizedSettings, localEntries)
-      else
-        await uploadEntriesToSynology(entriesToPush, normalizedSettings, localEntries)
+      await syncAdapter.pushEntries(entriesToPush, normalizedSettings, localEntries)
 
       const syncedAt = new Date().toISOString()
       const pushedEntries = entriesToPush.map((entry) => ({ ...entry, syncedAt, isEdited: false }))
       const pushedDraft = pushedEntries.find((entry) => entry.id === normalizedDraft.id) ?? normalizedDraft
-      const destination =
-        normalizedSettings.syncProvider === 'git'
-          ? getGitDisplayTarget(normalizedSettings)
-          : getEntryMarkdownFolder(normalizedSettings.markdownFolder, normalizedDraft)
+      const destination = syncAdapter.getPushDestination(normalizedSettings, normalizedDraft)
 
       setDraft(pushedDraft)
       setEntries((current) => upsertEntries(current, pushedEntries))
@@ -384,8 +459,11 @@ export function DiaryApp() {
       )
     } catch (error) {
       const normalizedSettings = normalizeSettings(settings)
-      setStatusMessage(error instanceof Error ? error.message : `${normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'} push failed.`)
+      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      setStatusMessage(error instanceof Error ? error.message : `${syncAdapter.label} push failed.`)
       setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings, entriesToPush[0] ?? normalizedDraft))
+    } finally {
+      setSyncProgress(null)
     }
   }
 
@@ -405,7 +483,8 @@ export function DiaryApp() {
   async function pullEntriesFromNas() {
     try {
       const normalizedSettings = normalizeSettings(settings)
-      const syncTarget = normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'
+      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      const syncTarget = syncAdapter.label
       let localEntries = entries
 
       if (isDraftDirty) {
@@ -415,17 +494,13 @@ export function DiaryApp() {
         setEntries(localEntries)
       }
 
-      setStatusMessage(`Pulling Markdown entries from ${syncTarget}...`)
-      const pulledEntries =
-        normalizedSettings.syncProvider === 'git'
-          ? await pullEntriesFromGit(normalizedSettings)
-          : await downloadEntriesFromSynology(normalizedSettings)
+      const progressMessage = `Pulling Markdown entries from ${syncTarget}...`
+      setStatusMessage(progressMessage)
+      setSyncProgress({ target: syncTarget, message: progressMessage })
+      const pulledEntries = await syncAdapter.pullEntries(normalizedSettings)
 
       if (!pulledEntries.length) {
-        const source =
-          normalizedSettings.syncProvider === 'git'
-            ? getGitDisplayTarget(normalizedSettings)
-            : normalizedSettings.markdownFolder
+        const source = syncAdapter.getPullSource(normalizedSettings)
         setStatusMessage(`No Markdown entries found in ${source}`)
         return
       }
@@ -450,8 +525,11 @@ export function DiaryApp() {
       finishPulledEntries(syncedPulledEntries, syncTarget, localEntries)
     } catch (error) {
       const normalizedSettings = normalizeSettings(settings)
-      setStatusMessage(error instanceof Error ? error.message : `${normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'} pull failed.`)
+      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      setStatusMessage(error instanceof Error ? error.message : `${syncAdapter.label} pull failed.`)
       setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings))
+    } finally {
+      setSyncProgress(null)
     }
   }
 
@@ -551,16 +629,14 @@ export function DiaryApp() {
 
   async function deleteEntryEverywhere(entry: DiaryEntry) {
     const normalizedSettings = normalizeSettings(settings)
+    const syncAdapter = getDiarySyncAdapter(normalizedSettings)
     const nextEntries = entries.filter((item) => item.id !== entry.id)
 
     try {
       setPendingDeleteEntry(null)
-      setStatusMessage(`Deleting ${formatDiaryDate(entry.diaryDate)} from ${normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'}...`)
+      setStatusMessage(`Deleting ${formatDiaryDate(entry.diaryDate)} from ${syncAdapter.label}...`)
 
-      if (normalizedSettings.syncProvider === 'git')
-        await deleteEntryFromGit(entry, normalizedSettings, nextEntries)
-      else
-        await deleteEntryFromSynology(entry, normalizedSettings, nextEntries)
+      await syncAdapter.deleteEntry(entry, normalizedSettings, nextEntries)
 
       setEntries(nextEntries)
 
@@ -570,7 +646,7 @@ export function DiaryApp() {
         setSelectedNotebook(nextEntries[0] ? getNotebookKey(nextDraft.diaryDate) : null)
       }
 
-      setStatusMessage(`Deleted ${formatDiaryDate(entry.diaryDate)} locally and from ${normalizedSettings.syncProvider === 'git' ? 'Git' : 'NAS'}`)
+      setStatusMessage(`Deleted ${formatDiaryDate(entry.diaryDate)} locally and from ${syncAdapter.label}`)
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Delete failed.')
       setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings, entry))
@@ -648,6 +724,8 @@ export function DiaryApp() {
 
             <EntryEditor
               content={draft.content}
+              people={richTextPeople.people}
+              personColors={richTextPeople.personColors}
               onContentChange={(content) => updateDraft({ content })}
               saveLabel={editedEntryCount > 1 ? 'Save All' : 'Save'}
               onSave={saveEditedEntries}
@@ -699,6 +777,21 @@ export function DiaryApp() {
           onClose={() => setPushedDiaryDates(null)}
         />
       )}
+      {syncProgress && (
+        <SyncProgressDialog
+          target={syncProgress.target}
+          title={syncProgress.title}
+          message={syncProgress.message}
+        />
+      )}
+      {pendingCloseConfirmation && (
+        <UnsavedCloseDialog
+          unsavedCount={closeUnsavedCount}
+          onCancel={() => setPendingCloseConfirmation(false)}
+          onDiscard={discardAndClose}
+          onSave={saveAndClose}
+        />
+      )}
       {syncErrorLog && <SyncErrorDialog log={syncErrorLog} onClose={() => setSyncErrorLog(null)} />}
     </main>
   )
@@ -706,19 +799,71 @@ export function DiaryApp() {
 
 function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
   const normalizedTags = normalizeTags(entry.tags)
+  const normalizedPeople = normalizePersonTags(entry.people ?? [])
   const normalizedCities = normalizeLocationColors(entry.locationColors, entry.cities)
 
   return {
     ...entry,
     tags: normalizedTags,
+    people: normalizedPeople,
     ...getNormalizedDailyWeatherFields(entry),
     tagColors: normalizeTagColors(entry.tagColors, normalizedTags),
+    personColors: normalizeTagColors(entry.personColors ?? {}, normalizedPeople, normalizePersonTag),
     locationColors: normalizedCities,
     updatedAt: savedAt,
     savedAt,
     syncedAt: null,
     isEdited: true,
   }
+}
+
+function syncEntryPersonColors(entry: DiaryEntry, settings: AppSettings): DiaryEntry {
+  const people = normalizePersonTags(entry.people ?? [])
+  const personColors: Record<string, string> = {}
+
+  for (const person of people) {
+    const color = getSettingsPersonColor(settings, person) ?? entry.personColors?.[person]
+
+    if (color)
+      personColors[person] = color
+  }
+
+  if (areStringArraysEqual(entry.people ?? [], people) && areRecordsEqual(entry.personColors ?? {}, personColors))
+    return entry
+
+  return {
+    ...entry,
+    people,
+    personColors,
+  }
+}
+
+function getSettingsPersonColor(settings: AppSettings, person: string): string | null {
+  const normalizedPerson = normalizePersonTag(person)
+
+  for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
+    if (normalizePersonTag(rawName) === normalizedPerson)
+      return tag.color
+  }
+
+  return null
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length)
+    return false
+
+  return left.every((value, index) => value === right[index])
+}
+
+function areRecordsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftEntries = Object.entries(left)
+  const rightEntries = Object.entries(right)
+
+  if (leftEntries.length !== rightEntries.length)
+    return false
+
+  return leftEntries.every(([key, value]) => right[key] === value)
 }
 
 function getEditedEntryCount(entries: DiaryEntry[], draft: DiaryEntry): number {
@@ -781,12 +926,14 @@ function getImportStatusMessage(
   fileName: string,
   importedCount: number,
   addedTags: string[],
+  addedPeople: string[],
   weatherFailureCount: number,
   encryptedCount: number,
   unsupportedCount: number,
 ): string {
   const detailParts = [
     addedTags.length ? `Added ${addedTags.length} activity ${addedTags.length === 1 ? 'tag' : 'tags'}` : '',
+    addedPeople.length ? `Added ${addedPeople.length} people ${addedPeople.length === 1 ? 'tag' : 'tags'}` : '',
     weatherFailureCount ? `${weatherFailureCount} weather ${weatherFailureCount === 1 ? 'fetch' : 'fetches'} failed` : '',
     encryptedCount ? `Skipped ${encryptedCount} encrypted ${encryptedCount === 1 ? 'note' : 'notes'}` : '',
     unsupportedCount ? `Skipped ${unsupportedCount} unsupported ${unsupportedCount === 1 ? 'note' : 'notes'}` : '',
