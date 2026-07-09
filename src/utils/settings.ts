@@ -38,6 +38,7 @@ export const defaultSettings: AppSettings = {
   activityTags: {},
   personColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
   peopleTags: {},
+  locationColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
   temperatureThresholds: DEFAULT_TEMPERATURE_THRESHOLDS,
 }
 
@@ -94,6 +95,7 @@ export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     activityTags: normalizeActivityTags(settings.activityTags ?? {}),
     personColorGroupNames: normalizeActivityColorGroupNames(settings.personColorGroupNames ?? settings.activityColorGroupNames ?? {}),
     peopleTags: normalizeActivityTags(settings.peopleTags ?? {}),
+    locationColorGroupNames: normalizeActivityColorGroupNames(settings.locationColorGroupNames ?? settings.activityColorGroupNames ?? {}),
     temperatureThresholds: normalizeTemperatureThresholds(settings.temperatureThresholds ?? getLegacyTemperatureThresholds(legacySettings.temperatureColorBands)),
   }
 }
@@ -221,6 +223,7 @@ function normalizeActivityTags(tags: AppSettings['activityTags']): AppSettings['
 
     normalized[name] = {
       color: tag.color || DEFAULT_TAG_COLOR,
+      pinned: tag.pinned === true,
     }
   }
 

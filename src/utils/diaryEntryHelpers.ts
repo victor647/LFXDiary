@@ -55,6 +55,129 @@ export function updateEntryLocations(entry: DiaryEntry, locationKey: string, nex
   }
 }
 
+export function updateEntryLocationCity(entry: DiaryEntry, locationKey: string, nextCity: City, color: string): DiaryEntry {
+  let changed = false
+  const locationColors = { ...entry.locationColors }
+  const weatherSamples = entry.weatherSamples.map((sample) => ({ ...sample }))
+  const cities = entry.cities.map((city) => {
+    if (getLocationNameKey(city) !== locationKey)
+      return city
+
+    changed = true
+    delete locationColors[city.id]
+    locationColors[nextCity.id] = color
+
+    for (const sample of weatherSamples) {
+      if (sample.cityId === city.id)
+        sample.cityId = nextCity.id
+    }
+
+    return nextCity
+  })
+
+  if (!changed)
+    return entry
+
+  return {
+    ...entry,
+    cities,
+    locationColors,
+    weatherSamples,
+    updatedAt: new Date().toISOString(),
+    isEdited: true,
+  }
+}
+
+export function mergeEntryLocations(entry: DiaryEntry, sourceLocationKey: string, targetName: string, color: string): DiaryEntry {
+  const targetKey = targetName.trim().toLowerCase()
+
+  if (!targetKey)
+    return entry
+
+  if (!entry.cities.some((city) => getLocationNameKey(city) === sourceLocationKey))
+    return entry
+
+  const hasTargetLocation = entry.cities.some((city) => getLocationNameKey(city) === targetKey && getLocationNameKey(city) !== sourceLocationKey)
+  const locationColors = { ...entry.locationColors }
+  const cities: City[] = []
+
+  for (const city of entry.cities) {
+    const cityKey = getLocationNameKey(city)
+
+    if (cityKey === sourceLocationKey) {
+      delete locationColors[city.id]
+
+      if (!hasTargetLocation) {
+        cities.push({ ...city, name: targetName })
+        locationColors[city.id] = color
+      }
+
+      continue
+    }
+
+    if (cityKey === targetKey && hasTargetLocation)
+      locationColors[city.id] = color
+
+    cities.push(city)
+  }
+
+  return {
+    ...entry,
+    cities,
+    locationColors,
+    updatedAt: new Date().toISOString(),
+    isEdited: true,
+  }
+}
+
+export function mergeEntryLocationCity(entry: DiaryEntry, sourceLocationKey: string, targetCity: City, color: string): DiaryEntry {
+  const targetKey = getLocationNameKey(targetCity)
+
+  if (!entry.cities.some((city) => getLocationNameKey(city) === sourceLocationKey))
+    return entry
+
+  const targetCityInEntry = entry.cities.find((city) => getLocationNameKey(city) === targetKey && getLocationNameKey(city) !== sourceLocationKey)
+  const locationColors = { ...entry.locationColors }
+  const weatherSamples = entry.weatherSamples.map((sample) => ({ ...sample }))
+  const cities: City[] = []
+
+  for (const city of entry.cities) {
+    const cityKey = getLocationNameKey(city)
+
+    if (cityKey === sourceLocationKey) {
+      delete locationColors[city.id]
+
+      const replacementCity = targetCityInEntry ?? targetCity
+
+      for (const sample of weatherSamples) {
+        if (sample.cityId === city.id)
+          sample.cityId = replacementCity.id
+      }
+
+      if (!targetCityInEntry) {
+        cities.push(replacementCity)
+        locationColors[replacementCity.id] = color
+      }
+
+      continue
+    }
+
+    if (cityKey === targetKey && targetCityInEntry)
+      locationColors[city.id] = color
+
+    cities.push(city)
+  }
+
+  return {
+    ...entry,
+    cities,
+    locationColors,
+    weatherSamples,
+    updatedAt: new Date().toISOString(),
+    isEdited: true,
+  }
+}
+
 export function getLocationNameKey(city: City): string {
   return city.name.trim().toLowerCase() || formatCityDisplayName(city).toLowerCase()
 }

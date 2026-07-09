@@ -3,6 +3,14 @@ import { formatCityDisplayName } from '../domain/city'
 
 export { formatCityDisplayName }
 
+export function formatCityFullName(city: City): string {
+  return [city.name, city.country === 'Unknown' ? '' : city.country]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part, index, parts) => parts.findIndex((item) => item.toLowerCase() === part.toLowerCase()) === index)
+    .join(', ')
+}
+
 export async function searchCitiesByName(query: string, count = 8): Promise<City[]> {
   const trimmed = query.trim()
 

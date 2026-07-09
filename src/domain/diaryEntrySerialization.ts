@@ -4,7 +4,6 @@ import {
   deserializeActivitiesMetadata,
   getCatalogActivityColorMap,
   normalizeActivitiesMetadata,
-  serializeActivitiesMetadata,
 } from './metadata/activitiesMetadata'
 import { deserializeDateMetadata, serializeDateMetadata } from './metadata/dateMetadata'
 import {
@@ -12,7 +11,6 @@ import {
   findCatalogCity,
   getCatalogLocationColorMap,
   isCity,
-  serializeLocationMetadata,
 } from './metadata/locationMetadata'
 import {
   deserializeMoodMetadata,
@@ -23,7 +21,6 @@ import {
   deserializePeopleMetadata,
   getCatalogPersonColorMap,
   normalizePeopleMetadata,
-  serializePeopleMetadata,
 } from './metadata/peopleMetadata'
 import {
   deserializeWeatherMetadata,
@@ -37,11 +34,9 @@ const metadataEnd = '-->'
 export function serializeDiaryEntryHeader(entry: DiaryEntry): string[] {
   return [
     serializeDateMetadata(entry),
-    serializeLocationMetadata(entry),
+    serializeEntryIdMetadata(entry),
     ...serializeWeatherMetadata(entry),
     serializeMoodMetadata(entry),
-    serializeActivitiesMetadata(entry),
-    serializePeopleMetadata(entry),
   ]
 }
 
@@ -96,10 +91,15 @@ function deserializeLegacyDiaryEntry(markdown: string, fileName: string, catalog
   if (!diaryDate)
     return null
 
-  const cities = deserializeLocationMetadata(headerLines.find((line) => line.startsWith('Location:')), catalog)
+  const entryId = deserializeEntryIdMetadata(headerLines.find((line) => line.startsWith('Entry ID:')))
+  const catalogMetadata = getCatalogEntryMetadata(catalog, getCatalogReferenceCandidates(diaryDate, entryId))
+  const cities = catalogMetadata.cities.length
+    ? catalogMetadata.cities
+    : deserializeLocationMetadata(headerLines.find((line) => line.startsWith('Location:')), catalog)
 
   return normalizeDeserializedEntry(
     {
+      id: entryId,
       diaryDate,
       cities,
       ...deserializeWeatherMetadata(
@@ -110,8 +110,8 @@ function deserializeLegacyDiaryEntry(markdown: string, fileName: string, catalog
         cities,
       ),
       mood: deserializeMoodMetadata(headerLines.find((line) => line.startsWith('Mood:'))),
-      tags: deserializeActivitiesMetadata(headerLines.find((line) => line.startsWith('Tags:'))),
-      people: deserializePeopleMetadata(headerLines.find((line) => line.startsWith('People:'))),
+      tags: catalogMetadata.tags ?? deserializeActivitiesMetadata(headerLines.find((line) => line.startsWith('Tags:'))),
+      people: catalogMetadata.people ?? deserializePeopleMetadata(headerLines.find((line) => line.startsWith('People:'))),
       content,
     },
     diaryDate,
@@ -181,7 +181,12 @@ function applyCatalogToEntry(entry: DiaryEntry, catalog: DiaryCatalog | undefine
   if (!catalog)
     return entry
 
-  const cities = entry.cities.map((city) => findCatalogCity(city.name, catalog) ?? city)
+  const catalogMetadata = getCatalogEntryMetadata(catalog, getCatalogReferenceCandidates(entry.diaryDate, entry.id))
+  const cities = catalogMetadata.cities.length
+    ? catalogMetadata.cities
+    : entry.cities.map((city) => findCatalogCity(city.name, catalog) ?? city)
+  const tags = catalogMetadata.tags ?? entry.tags
+  const people = catalogMetadata.people ?? entry.people
   const locationColors = {
     ...entry.locationColors,
     ...normalizeDeserializedColors(
@@ -193,18 +198,68 @@ function applyCatalogToEntry(entry: DiaryEntry, catalog: DiaryCatalog | undefine
   }
   const tagColors = {
     ...entry.tagColors,
-    ...normalizeDeserializedColors({}, entry.tags, DEFAULT_TAG_COLOR, getCatalogActivityColorMap(catalog)),
+    ...normalizeDeserializedColors({}, tags, DEFAULT_TAG_COLOR, getCatalogActivityColorMap(catalog)),
   }
   const personColors = {
     ...entry.personColors,
-    ...normalizeDeserializedColors({}, entry.people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
+    ...normalizeDeserializedColors({}, people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
   }
 
   return {
     ...entry,
     cities,
+    tags,
+    people,
     locationColors,
     tagColors,
     personColors,
   }
+}
+
+function serializeEntryIdMetadata(entry: DiaryEntry): string {
+  return `Entry ID: ${entry.id}`
+}
+
+function deserializeEntryIdMetadata(line: string | undefined): string | undefined {
+  const entryId = line?.replace(/^Entry ID:\s*/, '').trim()
+  return entryId || undefined
+}
+
+function getCatalogReferenceCandidates(diaryDate: string, entryId: string | undefined): string[] {
+  return Array.from(new Set([diaryDate, entryId, `nas-${diaryDate}`].filter((item): item is string => Boolean(item))))
+}
+
+function getCatalogEntryMetadata(catalog: DiaryCatalog | undefined, entryReferences: string[]): {
+  cities: City[]
+  tags: string[] | undefined
+  people: string[] | undefined
+} {
+  if (!catalog || !entryReferences.length)
+    return { cities: [], tags: undefined, people: undefined }
+
+  const entryReferenceSet = new Set(entryReferences)
+  const hasCatalogReference = Object.values(catalog.locations).some((location) => hasAnyEntryReference(location.entries, entryReferenceSet))
+    || Object.values(catalog.activities).some((activity) => hasAnyEntryReference(activity.entries, entryReferenceSet))
+    || Object.values(catalog.people).some((person) => hasAnyEntryReference(person.entries, entryReferenceSet))
+  const cities = Object.values(catalog.locations)
+    .filter((location) => hasAnyEntryReference(location.entries, entryReferenceSet))
+    .map((location) => location.city)
+  const tags = Object.entries(catalog.activities)
+    .filter(([, activity]) => hasAnyEntryReference(activity.entries, entryReferenceSet))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b))
+  const people = Object.entries(catalog.people)
+    .filter(([, person]) => hasAnyEntryReference(person.entries, entryReferenceSet))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b))
+
+  return {
+    cities,
+    tags: hasCatalogReference ? tags : undefined,
+    people: hasCatalogReference ? people : undefined,
+  }
+}
+
+function hasAnyEntryReference(entries: string[], entryReferences: Set<string>): boolean {
+  return entries.some((entry) => entryReferences.has(entry))
 }

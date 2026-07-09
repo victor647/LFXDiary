@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { Pin, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { DEFAULT_ACTIVITY_COLOR_GROUP_NAMES, DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
 import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
@@ -7,6 +7,7 @@ type ActivityChipButtonProps = {
   name: string
   color: string
   count?: number
+  pinned?: boolean
   onClick: () => void
 }
 
@@ -29,12 +30,13 @@ type ActivityEditDialogProps = {
   initialColor: string
   initialName: string
   itemLabel?: string
+  showDelete?: boolean
   onCancel: () => void
   onDelete: () => void
   onSave: (name: string, color: string) => void
 }
 
-export function ActivityChipButton({ name, color, count, onClick }: ActivityChipButtonProps) {
+export function ActivityChipButton({ name, color, count, pinned, onClick }: ActivityChipButtonProps) {
   return (
     <button
       type="button"
@@ -46,6 +48,7 @@ export function ActivityChipButton({ name, color, count, onClick }: ActivityChip
       }}
       onClick={onClick}
     >
+      {pinned && <Pin className="activity-chip-pin" size={11} />}
       <span className="activity-chip-name">{name}</span>
       {typeof count === 'number' && <span className="activity-chip-count">{count}</span>}
     </button>
@@ -113,6 +116,7 @@ export function ActivityEditDialog({
   initialColor,
   initialName,
   itemLabel = 'Activity',
+  showDelete = true,
   onCancel,
   onDelete,
   onSave,
@@ -138,9 +142,11 @@ export function ActivityEditDialog({
           }}
         />
         <div className="dialog-actions">
-          <button className="danger-button" type="button" onClick={onDelete}>
-            Delete
-          </button>
+          {showDelete && (
+            <button className="danger-button" type="button" onClick={onDelete}>
+              Delete
+            </button>
+          )}
           <button type="button" onClick={onCancel}>
             Cancel
           </button>

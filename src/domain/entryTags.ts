@@ -1,12 +1,40 @@
 import type { DiaryEntry } from './types'
-import { normalizePersonTag, normalizePersonTags, normalizeTag, normalizeTags } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizeTags, sanitizeTag } from './tags'
 
 export function updateEntryActivity(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  return updateEntryTagSet(entry, oldTag, nextTag, color, 'tags', 'tagColors', normalizeTag, normalizeTags)
+  return updateEntryTagSet(entry, oldTag, nextTag, color, 'tags', 'tagColors', sanitizeTag, normalizeTags)
 }
 
 export function updateEntryPerson(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  return updateEntryTagSet(entry, oldTag, nextTag, color, 'people', 'personColors', normalizePersonTag, normalizePersonTags)
+  const updatedEntry = updateEntryTagSet(entry, oldTag, nextTag, color, 'people', 'personColors', normalizePersonTag, normalizePersonTags)
+  if (updatedEntry === entry)
+    return entry
+
+  const normalizedNextTag = normalizePersonTag(nextTag)
+  const nextContent = replaceTagReferences(updatedEntry.content, [normalizePersonTag(oldTag), oldTag], normalizedNextTag)
+
+  if (nextContent === updatedEntry.content)
+    return updatedEntry
+
+  return {
+    ...updatedEntry,
+    content: nextContent,
+  }
+}
+
+function replaceTagReferences(content: string, oldValues: string[], nextValue: string): string {
+  const values = Array.from(new Set(oldValues.map((value) => value.trim()).filter((value) => value && value !== nextValue)))
+    .sort((a, b) => b.length - a.length)
+
+  if (!values.length || !nextValue)
+    return content
+
+  const pattern = new RegExp(values.map(escapeRegExp).join('|'), 'g')
+  return content.replace(pattern, nextValue)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function updateEntryTagSet(

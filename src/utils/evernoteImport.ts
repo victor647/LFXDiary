@@ -6,7 +6,7 @@ import {
   MAX_PEOPLE_PER_ENTRY,
   periodConfig,
 } from '../domain/constants'
-import type { AppSettings, City, DiaryEntry, MoodScore, RecentTag } from '../domain/types'
+import type { AppSettings, City, DiaryEntry, MoodScore, Period, RecentTag } from '../domain/types'
 import { formatCityDisplayName, searchCitiesByName } from './city'
 import { getDailyWeatherFields } from './diaryEntryHelpers'
 import { getRecentCities, getRecentPeople, getRecentTags, normalizeLocationColors } from './entries'
@@ -56,7 +56,7 @@ export function parseEvernoteHtml(html: string, fileName: string, fallbackDate =
   const bodyLines: string[] = []
 
   for (const line of lines) {
-    const match = line.match(/^(Location|Weather|Mood|Summary):\s*(.*)$/i)
+    const match = line.match(/^(Location|Weather|Mood|Summary|Effort):\s*(.*)$/i)
 
     if (match) {
       metadata.set(match[1].toLowerCase(), match[2].trim())
@@ -67,14 +67,26 @@ export function parseEvernoteHtml(html: string, fileName: string, fallbackDate =
   }
 
   const title = document.querySelector('title')?.textContent ?? ''
+  const diaryDate = parseDateFromText(title) ?? parseDateFromText(fileName) ?? toDateInputValue(fallbackDate)
 
   return {
-    diaryDate: parseDateFromText(title) ?? parseDateFromText(fileName) ?? toDateInputValue(fallbackDate),
+    diaryDate,
     locationNames: parseLocationNames(metadata.get('location') ?? ''),
     mood: parseMood(metadata.get('mood') ?? ''),
-    summaryItems: parseSummaryItems(metadata.get('summary') ?? ''),
+    summaryItems: parseSummaryItems(getImportedActivitySource(metadata, diaryDate)),
     content: bodyLines.join('\n\n').trim(),
   }
+}
+
+function getImportedActivitySource(metadata: Map<string, string>, diaryDate: string): string {
+  if (isLegacyEffortActivityDate(diaryDate))
+    return metadata.get('effort') ?? metadata.get('summary') ?? ''
+
+  return metadata.get('summary') ?? metadata.get('effort') ?? ''
+}
+
+function isLegacyEffortActivityDate(diaryDate: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(diaryDate) && diaryDate < '2025-03-01'
 }
 
 function parseEvernoteNotesXml(xmlText: string, fileName: string): EvernoteImportFileParseResult {
@@ -344,15 +356,11 @@ function dedupeCities(cities: City[]): City[] {
 }
 
 async function fetchImportedWeather(diaryDate: string, cities: City[], settings: AppSettings) {
-  const cityByPeriod = new Map(periodConfig.map((config) => {
-    const city = config.period === 'morning' ? cities[0] : cities[1] ?? cities[0]
-
-    return [config.period, city]
-  }))
+  const cityByPeriod = getImportedWeatherCityByPeriod(diaryDate, cities)
 
   return Promise.all(
     periodConfig.map((config) => {
-      const city = cityByPeriod.get(config.period)
+      const city = cityByPeriod[config.period]
 
       if (!city)
         throw new Error(`Missing weather location for ${config.label}`)
@@ -360,6 +368,36 @@ async function fetchImportedWeather(diaryDate: string, cities: City[], settings:
       return fetchWeatherSample(diaryDate, city, config.period, config.sampleTime, settings)
     }),
   )
+}
+
+function getImportedWeatherCityByPeriod(diaryDate: string, cities: City[]): Record<Period, City | undefined> {
+  const [firstCity, secondCity, thirdCity] = cities
+
+  if (thirdCity) {
+    return {
+      morning: firstCity,
+      afternoon: secondCity,
+      evening: thirdCity,
+    }
+  }
+
+  if (isFriday(diaryDate) && secondCity) {
+    return {
+      morning: firstCity,
+      afternoon: firstCity,
+      evening: secondCity,
+    }
+  }
+
+  return {
+    morning: firstCity,
+    afternoon: secondCity ?? firstCity,
+    evening: secondCity ?? firstCity,
+  }
+}
+
+function isFriday(diaryDate: string): boolean {
+  return new Date(`${diaryDate}T12:00:00`).getDay() === 5
 }
 
 function getImportedLocationColors(cities: City[], entries: DiaryEntry[]): Record<string, string> {

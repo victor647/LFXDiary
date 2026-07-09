@@ -11,9 +11,19 @@ import { SyncErrorDialog } from './components/SyncErrorDialog'
 import { SyncProgressDialog } from './components/SyncProgressDialog'
 import { UnsavedCloseDialog } from './components/UnsavedCloseDialog'
 import { getDiarySyncAdapter } from './application/diarySync'
-import { STORAGE_KEY } from './domain/constants'
+import type { DiarySyncAdapter } from './application/diarySync'
+import {
+  DIARY_CATALOG_FILE_NAME,
+  applyDiaryCatalogToSettings,
+  applySettingsToDiaryCatalog,
+  deserializeDiaryCatalog,
+  removeDiaryCatalogEntry,
+  serializeDiaryCatalog,
+  syncDiaryCatalogEntry,
+} from './domain/diaryCatalog'
 import { serializeDiaryEntryMarkdown } from './domain/diaryEntrySerialization'
-import type { AppSettings, DiaryEntry } from './domain/types'
+import { activityTagManager, locationTagManager, personTagManager } from './domain/tagModels'
+import type { AppSettings, DiaryCatalog, DiaryEntry, TagFilter, TagFilterOption } from './domain/types'
 import { formatDiaryDate, getNotebookKey, getNotebookYear, toDateInputValue } from './utils/date'
 import {
   getNormalizedDailyWeatherFields,
@@ -22,11 +32,17 @@ import {
   upsertEntries,
 } from './utils/diaryEntryHelpers'
 import {
-  groupEntriesByNotebook,
-  loadEntries,
+  groupEntriesByMonthIndex,
+  getMonthIndexEntryCount,
+  loadAllStoredEntries,
+  loadInitialDiaryEntries,
+  loadNotebookEntries,
+  loadStoredDiaryCatalog,
   makeBlankEntry,
   mergePulledEntries,
   normalizeLocationColors,
+  saveLoadedEntries,
+  saveStoredDiaryCatalog,
   upsertEntry,
 } from './utils/entries'
 import { createDiaryEntryFromEvernoteImport, parseEvernoteImportFile } from './utils/evernoteImport'
@@ -45,6 +61,8 @@ type PullConflict = {
 
 type PendingPullReview = {
   syncTarget: string
+  target: SyncTarget
+  targetLabel: string
   baseEntries: DiaryEntry[]
   resolvedEntries: DiaryEntry[]
   conflicts: PullConflict[]
@@ -55,58 +73,68 @@ type SyncProgress = {
   target: string
   message: string
   title?: string
+  current?: number
+  total?: number
 }
 
+type SyncTarget =
+  | { kind: 'month'; key: string }
+  | { kind: 'year'; year: string }
+
 export function DiaryApp() {
-  const [currentPage, setCurrentPage] = useState<'diary' | 'settings'>('diary')
+  const [currentPage, setCurrentPage] = useState<'diary' | 'settings' | 'catalog'>('diary')
   const [settings, setSettings] = useState(loadSettings)
-  const [entries, setEntries] = useState<DiaryEntry[]>(loadEntries)
+  const initialDiaryLoad = useMemo(loadInitialDiaryEntries, [])
+  const initialNotebookKey = initialDiaryLoad.monthKey ?? getNotebookKey(toDateInputValue(new Date()))
+  const [monthIndex, setMonthIndex] = useState(initialDiaryLoad.monthIndex)
+  const [loadedMonthKeys, setLoadedMonthKeys] = useState<Set<string>>(() => new Set(initialDiaryLoad.monthKey ? [initialDiaryLoad.monthKey] : []))
+  const [entries, setEntries] = useState<DiaryEntry[]>(initialDiaryLoad.entries)
+  const [diaryCatalog, setDiaryCatalog] = useState<DiaryCatalog>(loadStoredDiaryCatalog)
   const [draft, setDraft] = useState<DiaryEntry>(() => entries[0] ?? makeBlankEntry())
   const [searchQuery, setSearchQuery] = useState('')
+  const [tagFilter, setTagFilter] = useState<TagFilter>({ kind: '', color: '', tag: '' })
   const [statusMessage, setStatusMessage] = useState('Ready')
   const [syncErrorLog, setSyncErrorLog] = useState<string | null>(null)
-  const [selectedNotebook, setSelectedNotebook] = useState<string | null>(null)
+  const [selectedNotebook, setSelectedNotebook] = useState<string | null>(initialDiaryLoad.monthKey)
+  const [syncTarget, setSyncTarget] = useState<SyncTarget>(() => ({ kind: 'month', key: initialNotebookKey }))
   const [contextMenu, setContextMenu] = useState<{
     x: number
     y: number
     entry: DiaryEntry
   } | null>(null)
   const [pendingDeleteEntry, setPendingDeleteEntry] = useState<DiaryEntry | null>(null)
-  const [pendingForcePushMonth, setPendingForcePushMonth] = useState<string | null>(null)
+  const [pendingForcePushTarget, setPendingForcePushTarget] = useState<SyncTarget | null>(null)
   const [pendingPullReview, setPendingPullReview] = useState<PendingPullReview | null>(null)
   const [pushedDiaryDates, setPushedDiaryDates] = useState<string[] | null>(null)
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
   const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false)
-  const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([String(new Date().getFullYear())]))
-  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set([getNotebookKey(toDateInputValue(new Date()))]))
+  const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([getNotebookYear(initialNotebookKey)]))
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set(initialDiaryLoad.monthKey ? [initialDiaryLoad.monthKey] : []))
   const allowCloseRef = useRef(false)
   const hasUnsavedEntriesRef = useRef(false)
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
-  }, [entries])
 
   const sortedEntries = useMemo(
     () => [...entries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate)),
     [entries],
   )
 
+  const tagFilterOptions = useMemo(() => getTagFilterOptions(diaryCatalog, settings), [diaryCatalog, settings])
+  const tagFilterEntryReferences = useMemo(() => getTagFilterEntryReferences(diaryCatalog, tagFilter), [diaryCatalog, tagFilter])
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
 
-    if (!query)
-      return sortedEntries
-
     return sortedEntries.filter((entry) => {
-      const dateText = formatDiaryDate(entry.diaryDate).toLowerCase()
-      const cityText = entry.cities.map((city) => city.name).join(' ').toLowerCase()
-      const tagText = entry.tags.join(' ').toLowerCase()
-      const peopleText = (entry.people ?? []).join(' ').toLowerCase()
+      if (tagFilterEntryReferences && !tagFilterEntryReferences.has(entry.diaryDate) && !tagFilterEntryReferences.has(entry.id))
+        return false
+
+      if (!query)
+        return true
+
       const contentText = entry.content.toLowerCase()
 
-      return [dateText, cityText, tagText, peopleText, contentText].some((text) => text.includes(query))
+      return contentText.includes(query)
     })
-  }, [searchQuery, sortedEntries])
+  }, [searchQuery, sortedEntries, tagFilterEntryReferences])
 
   const notebookEntries = useMemo(() => {
     if (!selectedNotebook)
@@ -115,7 +143,12 @@ export function DiaryApp() {
     return searchResults.filter((entry) => getNotebookKey(entry.diaryDate) === selectedNotebook)
   }, [searchResults, selectedNotebook])
 
-  const notebookGroups = useMemo(() => groupEntriesByNotebook(searchResults), [searchResults])
+  const notebookGroups = useMemo(() => groupEntriesByMonthIndex(monthIndex, searchResults), [monthIndex, searchResults])
+  const hasSearchFilter = Boolean(searchQuery.trim() || tagFilter.kind)
+  const sidebarSearchResultCount = hasSearchFilter ? searchResults.length : getMonthIndexEntryCount(monthIndex)
+  const selectedNotebookCount = selectedNotebook
+    ? hasSearchFilter ? notebookEntries.length : getMonthIndexEntryCount(monthIndex, selectedNotebook)
+    : notebookEntries.length
   const draftSavedEntry = useMemo(() => entries.find((entry) => entry.id === draft.id), [draft.id, entries])
   const isDraftDirty = !draftSavedEntry || draftSavedEntry.updatedAt !== draft.updatedAt
   const editedEntryCount = useMemo(() => getEditedEntryCount(entries, draft), [draft, entries])
@@ -172,7 +205,7 @@ export function DiaryApp() {
   }, [])
 
   function updateDraft(patch: Partial<DiaryEntry>) {
-    setDraft((current) => ({
+    applyDraft((current) => ({
       ...current,
       ...patch,
       updatedAt: new Date().toISOString(),
@@ -181,7 +214,7 @@ export function DiaryApp() {
   }
 
   function updateDraftIfCurrent(entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) {
-    setDraft((current) => {
+    applyDraft((current) => {
       if (current.id !== entryId || current.diaryDate !== diaryDate)
         return current
 
@@ -192,6 +225,73 @@ export function DiaryApp() {
         isEdited: true,
       }
     })
+  }
+
+  function applyEntries(
+    nextEntries: DiaryEntry[] | ((current: DiaryEntry[]) => DiaryEntry[]),
+    nextLoadedMonthKeys = loadedMonthKeys,
+  ) {
+    setEntries((current) => {
+      const resolvedEntries = typeof nextEntries === 'function' ? nextEntries(current) : nextEntries
+      const monthsToSave = new Set(nextLoadedMonthKeys)
+      const resolvedEntryIds = new Set(resolvedEntries.map((entry) => entry.id))
+      const resolvedEntryDates = new Set(resolvedEntries.map((entry) => entry.diaryDate))
+      const removedEntryDates = current
+        .filter((entry) => !resolvedEntryIds.has(entry.id) && !resolvedEntryDates.has(entry.diaryDate))
+        .map((entry) => entry.diaryDate)
+
+      for (const entry of resolvedEntries)
+        monthsToSave.add(getNotebookKey(entry.diaryDate))
+
+      setMonthIndex(saveLoadedEntries(resolvedEntries, monthsToSave))
+      setDiaryCatalog((currentCatalog) => {
+        let nextCatalog = currentCatalog
+
+        for (const diaryDate of removedEntryDates)
+          nextCatalog = removeDiaryCatalogEntry(nextCatalog, diaryDate)
+
+        for (const entry of resolvedEntries)
+          nextCatalog = syncDiaryCatalogEntry(nextCatalog, entry)
+
+        if (resolvedEntryIds.has(draft.id))
+          nextCatalog = syncDiaryCatalogEntry(nextCatalog, draft)
+
+        saveStoredDiaryCatalog(nextCatalog)
+        return nextCatalog
+      })
+      return resolvedEntries
+    })
+  }
+
+  function applyDraft(nextDraft: DiaryEntry | ((current: DiaryEntry) => DiaryEntry)) {
+    setDraft((current) => {
+      const resolvedDraft = typeof nextDraft === 'function' ? nextDraft(current) : nextDraft
+      setDiaryCatalog((currentCatalog) => {
+        const nextCatalog = syncDiaryCatalogEntry(currentCatalog, resolvedDraft)
+
+        if (entries.some((entry) => entry.id === resolvedDraft.id))
+          saveStoredDiaryCatalog(nextCatalog)
+
+        return nextCatalog
+      })
+      return resolvedDraft
+    })
+  }
+
+  function applyDiaryCatalog(nextCatalog: DiaryCatalog) {
+    setDiaryCatalog(nextCatalog)
+    saveStoredDiaryCatalog(nextCatalog)
+  }
+
+  function loadMonthIfNeeded(monthKey: string): Set<string> {
+    if (loadedMonthKeys.has(monthKey))
+      return loadedMonthKeys
+
+    const nextLoadedMonthKeys = new Set([...loadedMonthKeys, monthKey])
+    const monthEntries = loadNotebookEntries(monthKey)
+    setLoadedMonthKeys(nextLoadedMonthKeys)
+    applyEntries((current) => upsertEntries(current, monthEntries), nextLoadedMonthKeys)
+    return nextLoadedMonthKeys
   }
 
   function saveEditedEntries() {
@@ -219,10 +319,10 @@ export function DiaryApp() {
 
     const nextEntries = Array.from(savedEntries.values())
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextEntries))
-    setDraft(normalizedDraft)
-    setEntries(nextEntries)
+    applyDraft(normalizedDraft)
+    applyEntries(nextEntries)
     setSelectedNotebook(getNotebookKey(normalizedDraft.diaryDate))
+    setSyncTarget({ kind: 'month', key: getNotebookKey(normalizedDraft.diaryDate) })
     setExpandedYears((current) => new Set([...current, getNotebookYear(normalizedDraft.diaryDate)]))
     setExpandedMonths((current) => new Set([...current, getNotebookKey(normalizedDraft.diaryDate)]))
     setStatusMessage(
@@ -263,12 +363,16 @@ export function DiaryApp() {
   function startNewEntry() {
     const { savedDraft, localEntries, didSave } = getNavigationSaveState()
     const next = makeBlankEntry()
+    const nextMonthKey = getNotebookKey(next.diaryDate)
     if (didSave)
-      setEntries(localEntries)
-    setDraft(next)
-    setSelectedNotebook(getNotebookKey(next.diaryDate))
+      applyEntries(localEntries)
+    if (!loadedMonthKeys.has(nextMonthKey))
+      setLoadedMonthKeys((current) => new Set([...current, nextMonthKey]))
+    applyDraft(next)
+    setSelectedNotebook(nextMonthKey)
+    setSyncTarget({ kind: 'month', key: nextMonthKey })
     setExpandedYears((current) => new Set([...current, getNotebookYear(next.diaryDate)]))
-    setExpandedMonths((current) => new Set([...current, getNotebookKey(next.diaryDate)]))
+    setExpandedMonths((current) => new Set([...current, nextMonthKey]))
     setStatusMessage(didSave ? `Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. New entry` : 'New entry')
   }
 
@@ -282,26 +386,20 @@ export function DiaryApp() {
     const nextEntry = localEntries.find((item) => item.id === entry.id) ?? entry
 
     if (didSave)
-      setEntries(localEntries)
+      applyEntries(localEntries)
 
-    setDraft(syncEntryPersonColors(nextEntry, settings))
+    applyDraft(syncEntryPersonColors(nextEntry, settings))
 
     if (didSave)
       setStatusMessage(`Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. Opened ${formatDiaryDate(nextEntry.diaryDate)}.`)
   }
 
-  async function importEvernoteFile(file: File) {
+  async function importEvernoteFiles(files: File[]) {
     try {
-      const importMessage = `Importing ${file.name}...`
+      const sourceLabel = formatImportSourceLabel(files)
+      const importMessage = `Importing ${sourceLabel}...`
       setStatusMessage(importMessage)
       setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: importMessage })
-      const text = await file.text()
-      const parsedFile = parseEvernoteImportFile(text, file.name)
-
-      if (!parsedFile.drafts.length) {
-        setStatusMessage(getEmptyImportStatusMessage(file.name, parsedFile.encryptedCount, parsedFile.unsupportedCount))
-        return
-      }
 
       let nextEntries = entries
       let nextSettings = settings
@@ -309,34 +407,56 @@ export function DiaryApp() {
       const addedTags = new Set<string>()
       const addedPeople = new Set<string>()
       let weatherFailureCount = 0
+      let encryptedCount = 0
+      let unsupportedCount = 0
+      let totalDraftCount = 0
+      let importedDraftCount = 0
 
-      for (const [index, importDraft] of parsedFile.drafts.entries()) {
-        const progressMessage = `Importing ${index + 1} of ${parsedFile.drafts.length} from ${file.name}...`
-        setStatusMessage(progressMessage)
-        setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: progressMessage })
-        const result = await createDiaryEntryFromEvernoteImport(importDraft, nextEntries, nextSettings)
+      for (const [fileIndex, file] of files.entries()) {
+        const readMessage = `Reading ${fileIndex + 1} of ${files.length}: ${file.name}...`
+        setStatusMessage(readMessage)
+        setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: readMessage })
+        const text = await file.text()
+        const parsedFile = parseEvernoteImportFile(text, file.name)
+        encryptedCount += parsedFile.encryptedCount
+        unsupportedCount += parsedFile.unsupportedCount
+        totalDraftCount += parsedFile.drafts.length
 
-        nextEntries = upsertEntry(nextEntries, result.entry)
-        nextSettings = result.settings
-        importedEntries.push(result.entry)
+        for (const importDraft of parsedFile.drafts) {
+          importedDraftCount += 1
+          const progressMessage = `Importing ${importedDraftCount} of ${totalDraftCount} from ${sourceLabel}...`
+          setStatusMessage(progressMessage)
+          setSyncProgress({ target: 'Notes', title: 'Importing Notes', message: progressMessage })
+          const result = await createDiaryEntryFromEvernoteImport(importDraft, nextEntries, nextSettings)
 
-        for (const tag of result.addedTags)
-          addedTags.add(tag)
+          nextEntries = upsertEntry(nextEntries, result.entry)
+          nextSettings = result.settings
+          importedEntries.push(result.entry)
 
-        for (const person of result.addedPeople)
-          addedPeople.add(person)
+          for (const tag of result.addedTags)
+            addedTags.add(tag)
 
-        if (!result.weatherFetched)
-          weatherFailureCount += 1
+          for (const person of result.addedPeople)
+            addedPeople.add(person)
+
+          if (!result.weatherFetched)
+            weatherFailureCount += 1
+        }
+      }
+
+      if (!importedEntries.length) {
+        setStatusMessage(getEmptyImportStatusMessage(sourceLabel, encryptedCount, unsupportedCount))
+        return
       }
 
       const newestImportedEntry = [...importedEntries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
 
       setSettings(nextSettings)
       saveSettings(nextSettings)
-      setEntries(nextEntries)
-      setDraft(newestImportedEntry)
+      applyEntries(nextEntries)
+      applyDraft(newestImportedEntry)
       setSelectedNotebook(getNotebookKey(newestImportedEntry.diaryDate))
+      setSyncTarget({ kind: 'month', key: getNotebookKey(newestImportedEntry.diaryDate) })
       setExpandedYears((current) => {
         const next = new Set(current)
 
@@ -355,13 +475,13 @@ export function DiaryApp() {
       })
       setStatusMessage(
         getImportStatusMessage(
-          file.name,
+          sourceLabel,
           importedEntries.length,
           Array.from(addedTags),
           Array.from(addedPeople),
           weatherFailureCount,
-          parsedFile.encryptedCount,
-          parsedFile.unsupportedCount,
+          encryptedCount,
+          unsupportedCount,
         ),
       )
     } catch (error) {
@@ -372,6 +492,8 @@ export function DiaryApp() {
   }
 
   function toggleYear(year: string) {
+    setSyncTarget({ kind: 'year', year })
+    setSelectedNotebook(null)
     setExpandedYears((current) => {
       const next = new Set(current)
 
@@ -385,7 +507,13 @@ export function DiaryApp() {
   }
 
   function toggleMonth(monthKey: string) {
+    setSyncTarget({ kind: 'month', key: monthKey })
     setSelectedNotebook(monthKey)
+    const willExpand = !expandedMonths.has(monthKey)
+
+    if (willExpand)
+      loadMonthIfNeeded(monthKey)
+
     setExpandedMonths((current) => {
       const next = new Set(current)
 
@@ -398,7 +526,21 @@ export function DiaryApp() {
     })
   }
 
-  async function pushCurrentMonthEntries() {
+  function revealSyncTarget(target: SyncTarget) {
+    setSyncTarget(target)
+
+    if (target.kind === 'month') {
+      setSelectedNotebook(target.key)
+      setExpandedYears((current) => new Set([...current, getNotebookYear(target.key)]))
+      setExpandedMonths((current) => new Set([...current, target.key]))
+      return
+    }
+
+    setSelectedNotebook(null)
+    setExpandedYears((current) => new Set([...current, target.year]))
+  }
+
+  async function pushSelectedEntries() {
     const now = new Date().toISOString()
     let normalizedDraft = draft
     let localEntries = entries
@@ -406,60 +548,57 @@ export function DiaryApp() {
     if (isDraftDirty) {
       normalizedDraft = getSavedDraftEntry(draft, now)
       localEntries = upsertEntry(entries, normalizedDraft)
-      setDraft(normalizedDraft)
-      setEntries(localEntries)
+      applyDraft(normalizedDraft)
+      applyEntries(localEntries)
     }
 
-    const targetNotebook = getNotebookKey(normalizedDraft.diaryDate)
-    const entriesToPush = localEntries.filter(
-      (entry) => getNotebookKey(entry.diaryDate) === targetNotebook && isEntryUnsynced(entry),
-    )
+    const target = syncTarget
+    const targetLabel = getSyncTargetLabel(target)
+    const entriesToPush = getSyncTargetEntries(loadAllStoredEntries(), target).filter(isEntryUnsynced)
 
-    setSelectedNotebook(targetNotebook)
-    setExpandedYears((current) => new Set([...current, getNotebookYear(normalizedDraft.diaryDate)]))
-    setExpandedMonths((current) => new Set([...current, targetNotebook]))
+    revealSyncTarget(target)
 
     if (!entriesToPush.length) {
-      setStatusMessage(`No unsynced entries in ${targetNotebook}.`)
-      setPendingForcePushMonth(targetNotebook)
+      setStatusMessage(`No unsynced entries in ${targetLabel}.`)
+      setPendingForcePushTarget(target)
       return
     }
 
-    await pushEntries(entriesToPush, localEntries, targetNotebook, normalizedDraft, false)
+    await pushEntries(entriesToPush, targetLabel, normalizedDraft, false)
   }
 
   async function pushEntries(
     entriesToPush: DiaryEntry[],
-    localEntries: DiaryEntry[],
-    targetNotebook: string,
+    targetLabel: string,
     normalizedDraft: DiaryEntry,
     isForcePush: boolean,
   ) {
     try {
       const normalizedSettings = normalizeSettings(settings)
-      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
       const syncTarget = syncAdapter.label
       const action = isForcePush ? 'Force pushing' : 'Pushing'
       const progressMessage = `${action} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} to ${syncTarget}...`
       setStatusMessage(progressMessage)
-      setSyncProgress({ target: syncTarget, message: progressMessage })
+      setSyncProgress({ target: syncTarget, message: progressMessage, current: 0, total: entriesToPush.length })
 
-      await syncAdapter.pushEntries(entriesToPush, normalizedSettings, localEntries)
+      await syncAdapter.pushEntries(entriesToPush, normalizedSettings, loadAllStoredEntries(), (current, total) => {
+        setSyncProgress({ target: syncTarget, message: progressMessage, current, total })
+      })
 
       const syncedAt = new Date().toISOString()
       const pushedEntries = entriesToPush.map((entry) => ({ ...entry, syncedAt, isEdited: false }))
-      const pushedDraft = pushedEntries.find((entry) => entry.id === normalizedDraft.id) ?? normalizedDraft
-      const destination = syncAdapter.getPushDestination(normalizedSettings, normalizedDraft)
+      const destination = syncAdapter.getPushDestination(normalizedSettings, entriesToPush[0] ?? normalizedDraft)
 
-      setDraft(pushedDraft)
-      setEntries((current) => upsertEntries(current, pushedEntries))
+      applyDraft((current) => pushedEntries.find((entry) => entry.id === current.id) ?? current)
+      applyEntries((current) => upsertEntries(current, pushedEntries))
       setPushedDiaryDates(pushedEntries.map((entry) => entry.diaryDate))
       setStatusMessage(
-        `${isForcePush ? 'Force pushed' : 'Pushed'} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} from ${targetNotebook} to ${destination}`,
+        `${isForcePush ? 'Force pushed' : 'Pushed'} ${entriesToPush.length} ${entriesToPush.length === 1 ? 'entry' : 'entries'} from ${targetLabel} to ${destination}`,
       )
     } catch (error) {
       const normalizedSettings = normalizeSettings(settings)
-      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
       setStatusMessage(error instanceof Error ? error.message : `${syncAdapter.label} push failed.`)
       setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings, entriesToPush[0] ?? normalizedDraft))
     } finally {
@@ -467,41 +606,70 @@ export function DiaryApp() {
     }
   }
 
-  async function forcePushMonth(monthKey: string) {
-    setPendingForcePushMonth(null)
-    const monthEntries = entries.filter((entry) => getNotebookKey(entry.diaryDate) === monthKey)
+  async function forcePushTarget(target: SyncTarget) {
+    setPendingForcePushTarget(null)
+    const targetLabel = getSyncTargetLabel(target)
+    const targetEntries = getSyncTargetEntries(loadAllStoredEntries(), target)
 
-    if (!monthEntries.length) {
-      setStatusMessage(`No entries in ${monthKey}.`)
+    if (!targetEntries.length) {
+      setStatusMessage(`No entries in ${targetLabel}.`)
       return
     }
 
-    const normalizedDraft = monthEntries.find((entry) => entry.id === draft.id) ?? monthEntries[0]
-    await pushEntries(monthEntries, entries, monthKey, normalizedDraft, true)
+    revealSyncTarget(target)
+    const normalizedDraft = targetEntries.find((entry) => entry.id === draft.id) ?? targetEntries[0]
+    await pushEntries(targetEntries, targetLabel, normalizedDraft, true)
+  }
+
+  async function pushSingleEntry(entry: DiaryEntry) {
+    setContextMenu(null)
+    const now = new Date().toISOString()
+    let normalizedDraft = draft
+    let localEntries = entries
+
+    if (isDraftDirty) {
+      normalizedDraft = getSavedDraftEntry(draft, now)
+      localEntries = upsertEntry(entries, normalizedDraft)
+      applyDraft(normalizedDraft)
+      applyEntries(localEntries)
+    }
+
+    const entryToPush = localEntries.find((item) => item.id === entry.id) ?? entry
+    const targetNotebook = getNotebookKey(entryToPush.diaryDate)
+    setSelectedNotebook(targetNotebook)
+    setSyncTarget({ kind: 'month', key: targetNotebook })
+    setExpandedYears((current) => new Set([...current, getNotebookYear(targetNotebook)]))
+    setExpandedMonths((current) => new Set([...current, targetNotebook]))
+    await pushEntries([entryToPush], targetNotebook, normalizedDraft, false)
   }
 
   async function pullEntriesFromNas() {
     try {
       const normalizedSettings = normalizeSettings(settings)
-      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
-      const syncTarget = syncAdapter.label
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
+      const syncLabel = syncAdapter.label
+      const target = syncTarget
+      const targetLabel = getSyncTargetLabel(target)
+      const targetNotebooks = getSyncTargetNotebookKeys(target)
       let localEntries = entries
 
       if (isDraftDirty) {
         const savedDraft = getSavedDraftEntry(draft, new Date().toISOString())
         localEntries = upsertEntry(entries, savedDraft)
-        setDraft(savedDraft)
-        setEntries(localEntries)
+        applyDraft(savedDraft)
+        applyEntries(localEntries)
       }
 
-      const progressMessage = `Pulling Markdown entries from ${syncTarget}...`
+      revealSyncTarget(target)
+      const progressMessage = `Pulling Markdown entries from ${targetLabel} on ${syncLabel}...`
       setStatusMessage(progressMessage)
-      setSyncProgress({ target: syncTarget, message: progressMessage })
-      const pulledEntries = await syncAdapter.pullEntries(normalizedSettings)
+      setSyncProgress({ target: syncLabel, message: progressMessage })
+      const pulledEntries = await syncAdapter.pullNotebookEntries(normalizedSettings, targetNotebooks, (current, total) => {
+        setSyncProgress({ target: syncLabel, message: progressMessage, current, total })
+      })
 
       if (!pulledEntries.length) {
-        const source = syncAdapter.getPullSource(normalizedSettings)
-        setStatusMessage(`No Markdown entries found in ${source}`)
+        setStatusMessage(`No Markdown entries found in ${targetLabel} on ${syncLabel}.`)
         return
       }
 
@@ -512,22 +680,87 @@ export function DiaryApp() {
       if (conflicts.length) {
         const conflictDates = new Set(conflicts.map((conflict) => conflict.cloudEntry.diaryDate))
         setPendingPullReview({
-          syncTarget,
+          syncTarget: syncLabel,
+          target,
+          targetLabel,
           baseEntries: localEntries,
           resolvedEntries: syncedPulledEntries.filter((entry) => !conflictDates.has(entry.diaryDate)),
           conflicts,
           index: 0,
         })
-        setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${syncTarget}.`)
+        setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${syncLabel}.`)
         return
       }
 
-      finishPulledEntries(syncedPulledEntries, syncTarget, localEntries)
+      finishPulledEntries(syncedPulledEntries, syncLabel, localEntries, target)
     } catch (error) {
       const normalizedSettings = normalizeSettings(settings)
-      const syncAdapter = getDiarySyncAdapter(normalizedSettings)
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
       setStatusMessage(error instanceof Error ? error.message : `${syncAdapter.label} pull failed.`)
-      setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings))
+      setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings, undefined, getSyncTargetPullSource(syncAdapter, normalizedSettings, syncTarget)))
+    } finally {
+      setSyncProgress(null)
+    }
+  }
+
+  async function pullSingleEntry(entry: DiaryEntry) {
+    setContextMenu(null)
+
+    try {
+      const normalizedSettings = normalizeSettings(settings)
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
+      const syncTarget = syncAdapter.label
+      const targetNotebook = getNotebookKey(entry.diaryDate)
+      let localEntries = entries
+
+      if (isDraftDirty) {
+        const savedDraft = getSavedDraftEntry(draft, new Date().toISOString())
+        localEntries = upsertEntry(entries, savedDraft)
+        applyDraft(savedDraft)
+        applyEntries(localEntries)
+      }
+
+      setSelectedNotebook(targetNotebook)
+      setSyncTarget({ kind: 'month', key: targetNotebook })
+      setExpandedYears((current) => new Set([...current, getNotebookYear(targetNotebook)]))
+      setExpandedMonths((current) => new Set([...current, targetNotebook]))
+
+      const progressMessage = `Pulling ${formatDiaryDate(entry.diaryDate)} from ${syncTarget}...`
+      setStatusMessage(progressMessage)
+      setSyncProgress({ target: syncTarget, message: progressMessage })
+      const pulledEntries = await syncAdapter.pullEntries(normalizedSettings, targetNotebook, (current, total) => {
+        setSyncProgress({ target: syncTarget, message: progressMessage, current, total })
+      })
+      const pulledEntry = pulledEntries.find((item) => item.diaryDate === entry.diaryDate)
+
+      if (!pulledEntry) {
+        setStatusMessage(`No Markdown entry found for ${formatDiaryDate(entry.diaryDate)} on ${syncTarget}.`)
+        return
+      }
+
+      const syncedPulledEntry = { ...pulledEntry, syncedAt: new Date().toISOString(), isEdited: false }
+      const conflicts = getPullConflicts(localEntries, [syncedPulledEntry])
+
+      if (conflicts.length) {
+        setPendingPullReview({
+          syncTarget,
+          target: { kind: 'month', key: targetNotebook },
+          targetLabel: targetNotebook,
+          baseEntries: localEntries,
+          resolvedEntries: [],
+          conflicts,
+          index: 0,
+        })
+        setStatusMessage(`Resolve pull conflict for ${formatDiaryDate(entry.diaryDate)} from ${syncTarget}.`)
+        return
+      }
+
+      finishPulledEntries([syncedPulledEntry], syncTarget, localEntries, { kind: 'month', key: targetNotebook })
+    } catch (error) {
+      const normalizedSettings = normalizeSettings(settings)
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
+      setStatusMessage(error instanceof Error ? error.message : `${syncAdapter.label} pull failed.`)
+      setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings, entry))
     } finally {
       setSyncProgress(null)
     }
@@ -537,30 +770,15 @@ export function DiaryApp() {
     pulledEntries: DiaryEntry[],
     syncTarget: string,
     baseEntries: DiaryEntry[],
+    target: SyncTarget,
     resolvedConflictCount = 0,
   ) {
     const nextEntries = mergePulledEntries(baseEntries, pulledEntries)
     const newestPulledEntry = [...pulledEntries].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
 
-    setEntries(nextEntries)
-    setDraft(newestPulledEntry)
-    setSelectedNotebook(getNotebookKey(newestPulledEntry.diaryDate))
-    setExpandedYears((current) => {
-      const next = new Set(current)
-
-      for (const entry of pulledEntries)
-        next.add(getNotebookYear(entry.diaryDate))
-
-      return next
-    })
-    setExpandedMonths((current) => {
-      const next = new Set(current)
-
-      for (const entry of pulledEntries)
-        next.add(getNotebookKey(entry.diaryDate))
-
-      return next
-    })
+    applyEntries(nextEntries)
+    applyDraft(newestPulledEntry)
+    revealSyncTarget(target)
 
     const conflictText = resolvedConflictCount
       ? ` Resolved ${resolvedConflictCount} ${resolvedConflictCount === 1 ? 'conflict' : 'conflicts'}.`
@@ -593,6 +811,7 @@ export function DiaryApp() {
       resolvedEntries,
       pendingPullReview.syncTarget,
       pendingPullReview.baseEntries,
+      pendingPullReview.target,
       pendingPullReview.conflicts.length,
     )
   }
@@ -616,11 +835,11 @@ export function DiaryApp() {
 
   function deleteLocalEntry(entry: DiaryEntry) {
     const nextEntries = entries.filter((item) => item.id !== entry.id)
-    setEntries(nextEntries)
+    applyEntries(nextEntries)
 
     if (draft.id === entry.id) {
       const nextDraft = nextEntries[0] ?? makeBlankEntry()
-      setDraft(nextDraft)
+      applyDraft(nextDraft)
       setSelectedNotebook(nextEntries[0] ? getNotebookKey(nextDraft.diaryDate) : null)
     }
 
@@ -629,20 +848,24 @@ export function DiaryApp() {
 
   async function deleteEntryEverywhere(entry: DiaryEntry) {
     const normalizedSettings = normalizeSettings(settings)
-    const syncAdapter = getDiarySyncAdapter(normalizedSettings)
     const nextEntries = entries.filter((item) => item.id !== entry.id)
 
     try {
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
       setPendingDeleteEntry(null)
       setStatusMessage(`Deleting ${formatDiaryDate(entry.diaryDate)} from ${syncAdapter.label}...`)
 
-      await syncAdapter.deleteEntry(entry, normalizedSettings, nextEntries)
+      await syncAdapter.deleteEntry(
+        entry,
+        normalizedSettings,
+        loadAllStoredEntries().filter((item) => item.id !== entry.id),
+      )
 
-      setEntries(nextEntries)
+      applyEntries(nextEntries)
 
       if (draft.id === entry.id) {
         const nextDraft = nextEntries[0] ?? makeBlankEntry()
-        setDraft(nextDraft)
+        applyDraft(nextDraft)
         setSelectedNotebook(nextEntries[0] ? getNotebookKey(nextDraft.diaryDate) : null)
       }
 
@@ -657,7 +880,91 @@ export function DiaryApp() {
     const normalizedSettings = normalizeSettings(settings)
     setSettings(normalizedSettings)
     saveSettings(normalizedSettings)
-    setStatusMessage('Settings saved')
+    setStatusMessage('Settings saved locally')
+  }
+
+  async function persistCatalog() {
+    const normalizedSettings = normalizeSettings(settings)
+    const nextCatalog = getDateReferencedCatalog(normalizedSettings)
+    setSettings(normalizedSettings)
+    saveSettings(normalizedSettings)
+    applyDiaryCatalog(nextCatalog)
+
+    try {
+      const syncAdapter = await getDiarySyncAdapter(normalizedSettings)
+      const progressMessage = `Syncing catalog to ${syncAdapter.label}...`
+      setStatusMessage(progressMessage)
+      setSyncProgress({
+        target: syncAdapter.label,
+        title: 'Saving Catalog',
+        message: progressMessage,
+        current: 0,
+        total: 2,
+      })
+      await syncAdapter.pushCatalog(nextCatalog, normalizedSettings, (current, total, label) => {
+        setSyncProgress({
+          target: syncAdapter.label,
+          title: 'Saving Catalog',
+          message: label ? `Synced ${label} to ${syncAdapter.label}.` : progressMessage,
+          current,
+          total,
+        })
+      })
+      setStatusMessage(`Catalog saved and synced to ${syncAdapter.label}`)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? `Catalog saved locally. Sync failed: ${error.message}` : 'Catalog saved locally. Sync failed.')
+      setSyncErrorLog(formatSyncErrorLog(error, normalizedSettings))
+    } finally {
+      setSyncProgress(null)
+    }
+  }
+
+  function exportCatalogFile() {
+    const normalizedSettings = normalizeSettings(settings)
+    const catalogToExport = getDateReferencedCatalog(normalizedSettings)
+    setSettings(normalizedSettings)
+    saveSettings(normalizedSettings)
+    applyDiaryCatalog(catalogToExport)
+    downloadTextFile(DIARY_CATALOG_FILE_NAME, serializeDiaryCatalog(catalogToExport), 'application/json;charset=utf-8')
+    setStatusMessage(`Exported catalog: ${DIARY_CATALOG_FILE_NAME}`)
+  }
+
+  function getDateReferencedCatalog(normalizedSettings: AppSettings): DiaryCatalog {
+    let nextCatalog = diaryCatalog
+    const catalogEntries = new Map<string, DiaryEntry>()
+
+    for (const entry of loadAllStoredEntries())
+      catalogEntries.set(entry.id, entry)
+
+    for (const entry of entries)
+      catalogEntries.set(entry.id, entry)
+
+    if (draft.savedAt || catalogEntries.has(draft.id))
+      catalogEntries.set(draft.id, draft)
+
+    for (const entry of catalogEntries.values())
+      nextCatalog = syncDiaryCatalogEntry(nextCatalog, entry)
+
+    return applySettingsToDiaryCatalog(nextCatalog, normalizedSettings)
+  }
+
+  async function importCatalogFile(file: File) {
+    try {
+      const importedCatalog = deserializeDiaryCatalog(await file.text())
+
+      if (!importedCatalog) {
+        setStatusMessage(`Catalog import failed: ${file.name} is not a valid catalog file.`)
+        return
+      }
+
+      const nextSettings = applyDiaryCatalogToSettings(normalizeSettings(settings), importedCatalog)
+      setSettings(nextSettings)
+      saveSettings(nextSettings)
+      applyDiaryCatalog(importedCatalog)
+      setStatusMessage(`Imported catalog from ${file.name}. Click Save Catalog to sync it.`)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? `Catalog import failed: ${error.message}` : 'Catalog import failed.')
+    }
   }
 
   return (
@@ -665,9 +972,12 @@ export function DiaryApp() {
       <Sidebar
         draftId={draft.id}
         searchQuery={searchQuery}
-        searchResultCount={searchResults.length}
+        searchResultCount={sidebarSearchResultCount}
         selectedNotebook={selectedNotebook}
-        selectedNotebookCount={notebookEntries.length}
+        selectedNotebookCount={selectedNotebookCount}
+        syncTarget={syncTarget}
+        tagFilter={tagFilter}
+        tagFilterOptions={tagFilterOptions}
         notebookGroups={notebookGroups}
         expandedYears={expandedYears}
         expandedMonths={expandedMonths}
@@ -675,15 +985,18 @@ export function DiaryApp() {
         unsavedEntryIds={unsavedEntryIds}
         contextMenu={contextMenu}
         statusMessage={sidebarStatusMessage}
+        isCatalogOpen={currentPage === 'catalog'}
         isSettingsOpen={currentPage === 'settings'}
         onNewEntry={startNewEntry}
-        onImportEvernoteFile={(file) => {
-          void importEvernoteFile(file)
+        onImportEvernoteFiles={(files) => {
+          void importEvernoteFiles(files)
         }}
-        onSync={pushCurrentMonthEntries}
+        onSync={pushSelectedEntries}
         onPull={pullEntriesFromNas}
+        onOpenCatalog={() => setCurrentPage('catalog')}
         onOpenSettings={() => setCurrentPage('settings')}
         onSearchChange={setSearchQuery}
+        onTagFilterChange={setTagFilter}
         onSelectNotebook={setSelectedNotebook}
         onSelectEntry={selectEntry}
         onToggleYear={toggleYear}
@@ -691,20 +1004,33 @@ export function DiaryApp() {
         onOpenContextMenu={setContextMenu}
         onCloseContextMenu={() => setContextMenu(null)}
         onExportEntry={exportEntry}
+        onPullEntry={(entry) => {
+          void pullSingleEntry(entry)
+        }}
+        onPushEntry={(entry) => {
+          void pushSingleEntry(entry)
+        }}
         onDeleteEntry={requestDeleteEntry}
       />
 
       <section className="editor">
-        {currentPage === 'settings' ? (
+        {currentPage === 'settings' || currentPage === 'catalog' ? (
           <SettingsPage
+            variant={currentPage}
             settings={settings}
             draft={draft}
             entries={entries}
+            diaryCatalog={diaryCatalog}
             onSettingsChange={setSettings}
-            onDraftChange={setDraft}
-            onEntriesChange={setEntries}
+            onDiaryCatalogChange={applyDiaryCatalog}
+            onDraftChange={applyDraft}
+            onEntriesChange={applyEntries}
             onStatusChange={setStatusMessage}
-            onSave={persistSettings}
+            onSave={currentPage === 'catalog' ? persistCatalog : persistSettings}
+            onExportCatalog={exportCatalogFile}
+            onImportCatalog={(file) => {
+              void importCatalogFile(file)
+            }}
             onBack={() => setCurrentPage('diary')}
           />
         ) : (
@@ -712,12 +1038,13 @@ export function DiaryApp() {
             <MetadataEditor
               draft={draft}
               entries={entries}
+              diaryCatalog={diaryCatalog}
               settings={settings}
               onSettingsChange={setSettings}
               onUpdateDraft={updateDraft}
               onUpdateDraftIfCurrent={updateDraftIfCurrent}
-              onDraftChange={setDraft}
-              onEntriesChange={setEntries}
+              onDraftChange={applyDraft}
+              onEntriesChange={applyEntries}
               onStatusChange={setStatusMessage}
               onErrorLog={setSyncErrorLog}
             />
@@ -747,13 +1074,13 @@ export function DiaryApp() {
           }}
         />
       )}
-      {pendingForcePushMonth && (
+      {pendingForcePushTarget && (
         <ForcePushDialog
-          monthKey={pendingForcePushMonth}
-          entryCount={entries.filter((entry) => getNotebookKey(entry.diaryDate) === pendingForcePushMonth).length}
-          onCancel={() => setPendingForcePushMonth(null)}
+          targetLabel={getSyncTargetLabel(pendingForcePushTarget)}
+          entryCount={getSyncTargetEntries(entries, pendingForcePushTarget).length}
+          onCancel={() => setPendingForcePushTarget(null)}
           onConfirm={() => {
-            void forcePushMonth(pendingForcePushMonth)
+            void forcePushTarget(pendingForcePushTarget)
           }}
         />
       )}
@@ -782,6 +1109,8 @@ export function DiaryApp() {
           target={syncProgress.target}
           title={syncProgress.title}
           message={syncProgress.message}
+          current={syncProgress.current}
+          total={syncProgress.total}
         />
       )}
       {pendingCloseConfirmation && (
@@ -836,6 +1165,103 @@ function syncEntryPersonColors(entry: DiaryEntry, settings: AppSettings): DiaryE
     people,
     personColors,
   }
+}
+
+function getTagFilterOptions(catalog: DiaryCatalog, settings: AppSettings): TagFilterOption[] {
+  return [
+    ...Object.entries(catalog.locations).map(([key, location]) => ({
+      kind: 'location' as const,
+      value: key,
+      name: location.city.name,
+      color: location.color,
+      colorLabel: locationTagManager.getColorGroupName(settings, location.color),
+    })),
+    ...Object.entries(catalog.activities).map(([name, activity]) => ({
+      kind: 'activity' as const,
+      value: name,
+      name,
+      color: activity.color,
+      colorLabel: activityTagManager.getColorGroupName(settings, activity.color),
+    })),
+    ...Object.entries(catalog.people).map(([name, person]) => ({
+      kind: 'person' as const,
+      value: name,
+      name,
+      color: person.color,
+      colorLabel: personTagManager.getColorGroupName(settings, person.color),
+    })),
+  ]
+}
+
+function getTagFilterEntryReferences(catalog: DiaryCatalog, filter: TagFilter): Set<string> | null {
+  if (!filter.kind)
+    return null
+
+  const entryReferences = new Set<string>()
+
+  if (filter.kind === 'location') {
+    for (const [key, location] of Object.entries(catalog.locations)) {
+      const nameMatches = !filter.tag || key === filter.tag
+      const colorMatches = !filter.color || location.color === filter.color
+
+      if (nameMatches && colorMatches)
+        addEntryReferences(entryReferences, location.entries)
+    }
+
+    return entryReferences
+  }
+
+  if (filter.kind === 'activity') {
+    for (const [name, activity] of Object.entries(catalog.activities)) {
+      const nameMatches = !filter.tag || name === filter.tag
+      const colorMatches = !filter.color || activity.color === filter.color
+
+      if (nameMatches && colorMatches)
+        addEntryReferences(entryReferences, activity.entries)
+    }
+
+    return entryReferences
+  }
+
+  for (const [name, person] of Object.entries(catalog.people)) {
+    const nameMatches = !filter.tag || name === filter.tag
+    const colorMatches = !filter.color || person.color === filter.color
+
+    if (nameMatches && colorMatches)
+      addEntryReferences(entryReferences, person.entries)
+  }
+
+  return entryReferences
+}
+
+function addEntryReferences(entryReferences: Set<string>, references: string[]) {
+  for (const reference of references)
+    entryReferences.add(reference)
+}
+
+function getSyncTargetLabel(target: SyncTarget): string {
+  return target.kind === 'month' ? target.key : target.year
+}
+
+function getSyncTargetEntries(entries: DiaryEntry[], target: SyncTarget): DiaryEntry[] {
+  if (target.kind === 'month')
+    return entries.filter((entry) => getNotebookKey(entry.diaryDate) === target.key)
+
+  return entries.filter((entry) => getNotebookYear(entry.diaryDate) === target.year)
+}
+
+function getSyncTargetNotebookKeys(target: SyncTarget): string[] {
+  if (target.kind === 'month')
+    return [target.key]
+
+  return Array.from({ length: 12 }, (_, index) => `${target.year}-${String(index + 1).padStart(2, '0')}`)
+}
+
+function getSyncTargetPullSource(adapter: DiarySyncAdapter, settings: AppSettings, target: SyncTarget): string {
+  if (target.kind === 'month')
+    return adapter.getPullSource(settings, target.key)
+
+  return `${adapter.label} ${target.year}`
 }
 
 function getSettingsPersonColor(settings: AppSettings, person: string): string | null {
@@ -920,6 +1346,13 @@ function getPullConflicts(localEntries: DiaryEntry[], cloudEntries: DiaryEntry[]
 
 function normalizeBodyText(content: string): string {
   return content.replace(/\r\n/g, '\n')
+}
+
+function formatImportSourceLabel(files: File[]): string {
+  if (files.length === 1)
+    return files[0].name
+
+  return `${files.length} files`
 }
 
 function getImportStatusMessage(

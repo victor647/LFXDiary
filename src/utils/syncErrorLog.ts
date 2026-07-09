@@ -1,12 +1,26 @@
 import type { AppSettings, DiaryEntry } from '../domain/types'
 import { getEntryMarkdownFolder, getEntryNasMarkdownFileName } from './files'
-import { GitSyncError, getEntryGitMarkdownPath } from './gitSync'
-import { SynologySyncError, getSynologyDisplayUrl } from './synology'
+import { getActiveNasUrl } from './settings'
+
+type GitSyncErrorLike = Error & {
+  name: 'GitSyncError'
+  operation?: string
+  originalMessage?: string
+}
+
+type SynologySyncErrorLike = Error & {
+  name: 'SynologySyncError'
+  phase?: string
+  endpoint?: string
+  code?: number
+  originalMessage?: string
+}
 
 export function formatSyncErrorLog(
   error: unknown,
   settings: AppSettings,
   entry?: DiaryEntry,
+  remoteFolder?: string,
 ): string {
   if (settings.syncProvider === 'git')
     return formatGitErrorLog(error, settings, entry)
@@ -14,7 +28,7 @@ export function formatSyncErrorLog(
   return formatNasErrorLog(
     error,
     settings,
-    entry ? getEntryMarkdownFolder(settings.markdownFolder, entry) : settings.markdownFolder,
+    remoteFolder ?? (entry ? getEntryMarkdownFolder(settings.markdownFolder, entry) : settings.markdownFolder),
     entry,
   )
 }
@@ -41,8 +55,9 @@ function formatGitErrorLog(
     lines.push(`Entry date: ${entry.diaryDate}`)
   }
 
-  if (error instanceof GitSyncError) {
-    lines.push(`Operation: ${error.operation}`)
+  if (isGitSyncError(error)) {
+    if (error.operation)
+      lines.push(`Operation: ${error.operation}`)
 
     if (error.originalMessage)
       lines.push(`Original error: ${error.originalMessage}`)
@@ -68,7 +83,7 @@ function formatNasErrorLog(
     `Time: ${new Date().toISOString()}`,
     `Message: ${error instanceof Error ? error.message : String(error)}`,
     `NAS mode: ${settings.nasMode}`,
-    `NAS URL: ${getSynologyDisplayUrl(settings)}`,
+    `NAS URL: ${getActiveNasUrl(settings)}`,
     `Remote folder: ${remoteFolder}`,
     `Username configured: ${settings.nasUsername ? 'yes' : 'no'}`,
     `Password configured: ${settings.nasPassword ? 'yes' : 'no'}`,
@@ -79,9 +94,12 @@ function formatNasErrorLog(
     lines.push(`Entry date: ${entry.diaryDate}`)
   }
 
-  if (error instanceof SynologySyncError) {
-    lines.push(`Phase: ${error.phase}`)
-    lines.push(`Endpoint: ${error.endpoint}`)
+  if (isSynologySyncError(error)) {
+    if (error.phase)
+      lines.push(`Phase: ${error.phase}`)
+
+    if (error.endpoint)
+      lines.push(`Endpoint: ${error.endpoint}`)
 
     if (error.code !== undefined)
       lines.push(`Code: ${error.code}`)
@@ -93,7 +111,7 @@ function formatNasErrorLog(
   if (error instanceof Error && error.stack)
     lines.push(`Stack:\n${error.stack}`)
 
-  if (error instanceof SynologySyncError && error.code === 119) {
+  if (isSynologySyncError(error) && error.code === 119) {
     lines.push(
       'Hint: DSM error 119 means invalid session. The app will pass _sid and SynoToken through URL parameters for upload requests.',
     )
@@ -104,4 +122,25 @@ function formatNasErrorLog(
   }
 
   return lines.join('\n')
+}
+
+function isGitSyncError(error: unknown): error is GitSyncErrorLike {
+  return error instanceof Error && error.name === 'GitSyncError'
+}
+
+function isSynologySyncError(error: unknown): error is SynologySyncErrorLike {
+  return error instanceof Error && error.name === 'SynologySyncError'
+}
+
+function getEntryGitMarkdownPath(settings: AppSettings, entry: DiaryEntry): string {
+  const [year, month] = entry.diaryDate.slice(0, 7).split('-')
+  return joinGitPath(settings.gitDiaryPath, year, month, getEntryNasMarkdownFileName(entry))
+}
+
+function joinGitPath(...parts: string[]): string {
+  return parts.map(normalizeGitPath).filter(Boolean).join('/')
+}
+
+function normalizeGitPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 }

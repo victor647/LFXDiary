@@ -1,4 +1,4 @@
-import type { AppSettings, DiaryEntry } from '../domain/types'
+import type { AppSettings, DiaryCatalog, DiaryEntry, NasConnectionMode } from '../domain/types'
 import {
   DIARY_CATALOG_FILE_NAME,
   WEATHER_CODES_FILE_NAME,
@@ -13,6 +13,7 @@ import {
 import {
   getEntryMarkdownFolder,
   getEntryNasMarkdownFileName,
+  getNotebookMarkdownFolder,
 } from './files'
 import { getRuntimeNasProxyBasePath, getRuntimeNasProxyMode } from './runtimeConfig'
 import { getActiveNasUrl } from './settings'
@@ -44,6 +45,19 @@ type SynologyListData = {
 }
 
 const SYNC_REQUEST_TIMEOUT_MS = 10000
+const PULL_REQUEST_TIMEOUT_MS = 30000
+const CATALOG_SYNC_REQUEST_TIMEOUT_MS = 30000
+const PULL_FALLBACK_DELAY_MS = 5000
+
+type SyncProgressCallback = (current: number, total: number, label?: string) => void
+
+type SynologyRequestOptions = {
+  requestTimeoutMs?: number
+}
+
+type SynologyPullResult =
+  | { status: 'fulfilled'; mode: NasConnectionMode; entries: DiaryEntry[] }
+  | { status: 'rejected'; mode: NasConnectionMode; error: unknown }
 
 export class SynologySyncError extends Error {
   phase: string
@@ -61,7 +75,12 @@ export class SynologySyncError extends Error {
   }
 }
 
-export async function uploadEntriesToSynology(entries: DiaryEntry[], settings: AppSettings, catalogEntries: DiaryEntry[]) {
+export async function uploadEntriesToSynology(
+  entries: DiaryEntry[],
+  settings: AppSettings,
+  catalogEntries: DiaryEntry[],
+  onProgress?: SyncProgressCallback,
+) {
   if (!settings.nasUsername.trim() || !settings.nasPassword)
     throw new Error('Enter your NAS username and password in Settings first.')
 
@@ -72,7 +91,7 @@ export async function uploadEntriesToSynology(entries: DiaryEntry[], settings: A
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword)
 
   try {
-    for (const entry of entries) {
+    for (const [index, entry] of entries.entries()) {
       await uploadMarkdownFile(
         baseUrl,
         session,
@@ -80,6 +99,7 @@ export async function uploadEntriesToSynology(entries: DiaryEntry[], settings: A
         getEntryNasMarkdownFileName(entry),
         serializeDiaryEntryMarkdown(entry),
       )
+      onProgress?.(index + 1, entries.length, entry.diaryDate)
     }
 
     await uploadTextFile(
@@ -87,7 +107,7 @@ export async function uploadEntriesToSynology(entries: DiaryEntry[], settings: A
       session,
       settings.markdownFolder,
       DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(catalogEntries),
+      serializeDiaryCatalog(catalogEntries, settings),
       'application/json;charset=utf-8',
     )
     await uploadTextFile(
@@ -117,7 +137,7 @@ export async function deleteEntryFromSynology(entry: DiaryEntry, settings: AppSe
       session,
       settings.markdownFolder,
       DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(catalogEntries),
+      serializeDiaryCatalog(catalogEntries, settings),
       'application/json;charset=utf-8',
     )
     await uploadTextFile(
@@ -133,26 +153,212 @@ export async function deleteEntryFromSynology(entry: DiaryEntry, settings: AppSe
   }
 }
 
-export async function downloadEntriesFromSynology(settings: AppSettings): Promise<DiaryEntry[]> {
+export async function uploadDiaryCatalogToSynology(
+  catalog: DiaryCatalog,
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+) {
   if (!settings.nasUsername.trim() || !settings.nasPassword)
     throw new Error('Enter your NAS username and password in Settings first.')
 
-  const baseUrl = getSynologyApiBaseUrl(settings)
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword)
+  const uploadModes = getSynologyPullModes(settings)
+  const primaryMode = uploadModes[0]
+
+  if (uploadModes.length === 1)
+    return uploadDiaryCatalogToSynologyMode(catalog, { ...settings, nasMode: primaryMode }, onProgress)
+
+  const fallbackMode = uploadModes[1]
 
   try {
-    const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder)
-    const markdownFiles = await listMarkdownFiles(baseUrl, session, settings.markdownFolder, 0)
-    const entries = await Promise.all(
-      markdownFiles.map(async (file) =>
-        deserializeDiaryEntryMarkdown(await downloadMarkdownFile(baseUrl, session, file.path), file.name, catalog),
-      ),
+    await uploadDiaryCatalogToSynologyMode(catalog, { ...settings, nasMode: primaryMode }, onProgress)
+  } catch (error) {
+    if (!shouldFallbackSynologyPull(error))
+      throw error
+
+    onProgress?.(0, 2, `Retrying through ${fallbackMode} NAS connection`)
+
+    try {
+      await uploadDiaryCatalogToSynologyMode(catalog, { ...settings, nasMode: fallbackMode }, onProgress)
+    } catch (fallbackError) {
+      throw getSynologyPullFallbackError(fallbackError, error, primaryMode, fallbackMode)
+    }
+  }
+}
+
+async function uploadDiaryCatalogToSynologyMode(
+  catalog: DiaryCatalog,
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+) {
+  const baseUrl = getSynologyApiBaseUrl(settings)
+  const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
+  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+
+  try {
+    await uploadTextFile(
+      baseUrl,
+      session,
+      settings.markdownFolder,
+      DIARY_CATALOG_FILE_NAME,
+      serializeDiaryCatalog(catalog, settings),
+      'application/json;charset=utf-8',
+      requestOptions,
+    )
+    onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
+    await uploadTextFile(
+      baseUrl,
+      session,
+      settings.markdownFolder,
+      WEATHER_CODES_FILE_NAME,
+      serializeWeatherCodes(),
+      'application/json;charset=utf-8',
+      requestOptions,
+    )
+    onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)
+  } finally {
+    await logoutFromSynology(baseUrl, session, requestOptions)
+  }
+}
+
+export async function downloadEntriesFromSynology(
+  settings: AppSettings,
+  notebookKey?: string,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
+  return downloadNotebookEntriesFromSynology(settings, notebookKey ? [notebookKey] : undefined, onProgress)
+}
+
+export async function downloadNotebookEntriesFromSynology(
+  settings: AppSettings,
+  notebookKeys?: string[],
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
+  if (!settings.nasUsername.trim() || !settings.nasPassword)
+    throw new Error('Enter your NAS username and password in Settings first.')
+
+  const pullModes = getSynologyPullModes(settings)
+  const primaryMode = pullModes[0]
+
+  if (pullModes.length === 1)
+    return downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress)
+
+  const fallbackMode = pullModes[1]
+  const primaryPull = settleSynologyPull(
+    primaryMode,
+    downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
+  )
+  const firstResult = await Promise.race([
+    primaryPull,
+    delay(PULL_FALLBACK_DELAY_MS).then(() => null),
+  ])
+
+  if (firstResult?.status === 'fulfilled')
+    return firstResult.entries
+
+  if (firstResult?.status === 'rejected') {
+    if (!shouldFallbackSynologyPull(firstResult.error))
+      throw firstResult.error
+
+    const fallbackResult = await settleSynologyPull(
+      fallbackMode,
+      downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
     )
 
-    return entries.filter((entry): entry is DiaryEntry => Boolean(entry))
-  } finally {
-    await logoutFromSynology(baseUrl, session)
+    if (fallbackResult.status === 'fulfilled')
+      return fallbackResult.entries
+
+    throw getSynologyPullFallbackError(fallbackResult.error, firstResult.error, primaryMode, fallbackMode)
   }
+
+  return downloadEntriesWithFallbackRace(settings, primaryPull, primaryMode, fallbackMode, notebookKeys, onProgress)
+}
+
+async function downloadEntriesFromSynologyMode(
+  settings: AppSettings,
+  requestTimeoutMs: number,
+  notebookKeys?: string[],
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
+  const baseUrl = getSynologyApiBaseUrl(settings)
+  const requestOptions = { requestTimeoutMs }
+  const markdownFolders = notebookKeys?.length
+    ? notebookKeys.map((notebookKey) => getNotebookMarkdownFolder(settings.markdownFolder, notebookKey))
+    : [settings.markdownFolder]
+  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+
+  try {
+    const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
+    const markdownFiles = (await Promise.all(
+      markdownFolders.map((markdownFolder) => listMarkdownFiles(baseUrl, session, markdownFolder, 0, requestOptions)),
+    )).flat()
+    const entries: DiaryEntry[] = []
+
+    for (const [index, file] of markdownFiles.entries()) {
+      const entry = deserializeDiaryEntryMarkdown(await downloadMarkdownFile(baseUrl, session, file.path, requestOptions), file.name, catalog)
+
+      if (entry)
+        entries.push(entry)
+
+      onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? file.name)
+    }
+
+    return entries
+  } finally {
+    await logoutFromSynology(baseUrl, session, requestOptions)
+  }
+}
+
+async function downloadEntriesWithFallbackRace(
+  settings: AppSettings,
+  primaryPull: Promise<SynologyPullResult>,
+  primaryMode: NasConnectionMode,
+  fallbackMode: NasConnectionMode,
+  notebookKeys?: string[],
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
+  const fallbackPull = settleSynologyPull(
+    fallbackMode,
+    downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
+  )
+  const firstResult = await Promise.race([primaryPull, fallbackPull])
+
+  if (firstResult.status === 'fulfilled')
+    return firstResult.entries
+
+  const secondResult = await (firstResult.mode === primaryMode ? fallbackPull : primaryPull)
+
+  if (secondResult.status === 'fulfilled')
+    return secondResult.entries
+
+  const primaryError = firstResult.mode === primaryMode ? firstResult.error : secondResult.error
+  const fallbackError = firstResult.mode === fallbackMode ? firstResult.error : secondResult.error
+
+  throw getSynologyPullFallbackError(fallbackError, primaryError, primaryMode, fallbackMode)
+}
+
+async function settleSynologyPull(
+  mode: NasConnectionMode,
+  pull: Promise<DiaryEntry[]>,
+): Promise<SynologyPullResult> {
+  try {
+    return {
+      status: 'fulfilled',
+      mode,
+      entries: await pull,
+    }
+  } catch (error) {
+    return {
+      status: 'rejected',
+      mode,
+      error,
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 export function getSynologyDisplayUrl(settings: AppSettings): string {
@@ -164,6 +370,67 @@ function getSynologyApiBaseUrl(settings: AppSettings): string {
     return new URL(getRuntimeNasProxyBasePath(settings.nasMode), window.location.href).toString()
 
   return getActiveNasUrl(settings)
+}
+
+function getSynologyPullModes(settings: AppSettings): NasConnectionMode[] {
+  const primaryMode = settings.nasMode
+  const fallbackMode: NasConnectionMode = primaryMode === 'lan' ? 'public' : 'lan'
+
+  if (!isNasModeConfigured(settings, fallbackMode))
+    return [primaryMode]
+
+  if (getSynologyApiBaseUrl({ ...settings, nasMode: primaryMode }) === getSynologyApiBaseUrl({ ...settings, nasMode: fallbackMode }))
+    return [primaryMode]
+
+  return [primaryMode, fallbackMode]
+}
+
+function isNasModeConfigured(settings: AppSettings, mode: NasConnectionMode): boolean {
+  return getNasModeUrl(settings, mode).trim().length > 0
+}
+
+function getNasModeUrl(settings: AppSettings, mode: NasConnectionMode): string {
+  return mode === 'lan' ? settings.lanNasUrl : settings.publicNasUrl
+}
+
+function shouldFallbackSynologyPull(error: unknown): boolean {
+  if (!(error instanceof SynologySyncError))
+    return false
+
+  if (error.code === 502 || error.code === 503 || error.code === 504)
+    return true
+
+  return error.code === undefined && (
+    error.message.includes('timed out')
+    || error.message.includes('Network request failed')
+    || Boolean(error.originalMessage?.includes('AbortError'))
+    || Boolean(error.originalMessage?.includes('Failed to fetch'))
+  )
+}
+
+function getSynologyPullFallbackError(
+  fallbackError: unknown,
+  primaryError: unknown,
+  primaryMode: NasConnectionMode,
+  fallbackMode: NasConnectionMode,
+): unknown {
+  const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError)
+  const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+  const originalMessage = `Primary ${primaryMode} pull failed before fallback: ${primaryMessage}`
+
+  if (fallbackError instanceof SynologySyncError) {
+    return new SynologySyncError(
+      fallbackMessage,
+      fallbackError.phase,
+      fallbackError.endpoint,
+      fallbackError.code,
+      fallbackError.originalMessage
+        ? `${originalMessage}. Fallback ${fallbackMode} original error: ${fallbackError.originalMessage}`
+        : originalMessage,
+    )
+  }
+
+  return new Error(`NAS pull failed after ${primaryMode} fallback to ${fallbackMode}. ${fallbackMessage}. ${originalMessage}`)
 }
 
 function usesSynologyProxy(): boolean {
@@ -181,7 +448,12 @@ function usesSynologyProxy(): boolean {
   return window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname)
 }
 
-async function loginToSynology(baseUrl: string, username: string, password: string): Promise<SynologySession> {
+async function loginToSynology(
+  baseUrl: string,
+  username: string,
+  password: string,
+  options: SynologyRequestOptions = {},
+): Promise<SynologySession> {
   const url = new URL('webapi/entry.cgi', baseUrl)
   const body = new URLSearchParams({
     api: 'SYNO.API.Auth',
@@ -193,7 +465,7 @@ async function loginToSynology(baseUrl: string, username: string, password: stri
     format: 'sid',
     enable_syno_token: 'yes',
   })
-  const response = await fetchSynology(url, { method: 'POST', body }, 'login')
+  const response = await fetchSynology(url, { method: 'POST', body }, 'login', options)
   const payload = (await parseSynologyResponse<SynologyLoginData>(response, 'login', url.toString()))
 
   if (!payload.success || !payload.data?.sid)
@@ -216,8 +488,9 @@ async function uploadMarkdownFile(
   folder: string,
   fileName: string,
   markdown: string,
+  options: SynologyRequestOptions = {},
 ) {
-  await uploadTextFile(baseUrl, session, folder, fileName, markdown, 'text/markdown;charset=utf-8')
+  await uploadTextFile(baseUrl, session, folder, fileName, markdown, 'text/markdown;charset=utf-8', options)
 }
 
 async function uploadTextFile(
@@ -227,6 +500,7 @@ async function uploadTextFile(
   fileName: string,
   content: string,
   contentType: string,
+  options: SynologyRequestOptions = {},
 ) {
   const url = new URL('webapi/entry.cgi', baseUrl)
   url.searchParams.set('_sid', session.sid)
@@ -243,7 +517,7 @@ async function uploadTextFile(
   body.append('overwrite', 'true')
   body.append('file', new Blob([content], { type: contentType }), fileName)
 
-  const response = await fetchSynology(url, { method: 'POST', body }, 'upload')
+  const response = await fetchSynology(url, { method: 'POST', body }, 'upload', options)
   const payload = await parseSynologyResponse(response, 'upload', url.toString())
 
   if (!payload.success)
@@ -259,14 +533,15 @@ async function downloadDiaryCatalog(
   baseUrl: string,
   session: SynologySession,
   folder: string,
+  options: SynologyRequestOptions = {},
 ) {
-  const payload = await listFolder(baseUrl, session, folder)
+  const payload = await listFolder(baseUrl, session, folder, options)
   const catalogFile = (payload.data?.files ?? []).find((file) => !file.isdir && file.name === DIARY_CATALOG_FILE_NAME)
 
   if (!catalogFile)
     return undefined
 
-  return deserializeDiaryCatalog(await downloadTextFile(baseUrl, session, catalogFile.path)) ?? undefined
+  return deserializeDiaryCatalog(await downloadTextFile(baseUrl, session, catalogFile.path, options)) ?? undefined
 }
 
 async function listMarkdownFiles(
@@ -274,8 +549,9 @@ async function listMarkdownFiles(
   session: SynologySession,
   folder: string,
   depth: number,
+  options: SynologyRequestOptions = {},
 ): Promise<SynologyListFile[]> {
-  const payload = await listFolder(baseUrl, session, folder)
+  const payload = await listFolder(baseUrl, session, folder, options)
   const markdownFiles = (payload.data?.files ?? []).filter((file) => !file.isdir && file.name.toLowerCase().endsWith('.md'))
   const childFolders = (payload.data?.files ?? []).filter((file) => file.isdir)
 
@@ -283,13 +559,18 @@ async function listMarkdownFiles(
     return markdownFiles
 
   const childFiles = await Promise.all(
-    childFolders.map((childFolder) => listMarkdownFiles(baseUrl, session, childFolder.path, depth + 1)),
+    childFolders.map((childFolder) => listMarkdownFiles(baseUrl, session, childFolder.path, depth + 1, options)),
   )
 
   return [...markdownFiles, ...childFiles.flat()]
 }
 
-async function listFolder(baseUrl: string, session: SynologySession, folder: string): Promise<SynologyResponse<SynologyListData>> {
+async function listFolder(
+  baseUrl: string,
+  session: SynologySession,
+  folder: string,
+  options: SynologyRequestOptions = {},
+): Promise<SynologyResponse<SynologyListData>> {
   const url = makeAuthedSynologyUrl(baseUrl, session)
   const body = new URLSearchParams({
     api: 'SYNO.FileStation.List',
@@ -304,8 +585,11 @@ async function listFolder(baseUrl: string, session: SynologySession, folder: str
     sort_direction: 'asc',
   })
 
-  const response = await fetchSynology(url, { method: 'POST', body }, 'list')
+  const response = await fetchSynology(url, { method: 'POST', body }, 'list', options)
   const payload = await parseSynologyResponse<SynologyListData>(response, 'list', url.toString())
+
+  if (!payload.success && isMissingRemoteFolderCode(payload.error?.code))
+    return { ...payload, data: { files: [] } }
 
   if (!payload.success)
     throw new SynologySyncError(
@@ -318,8 +602,17 @@ async function listFolder(baseUrl: string, session: SynologySession, folder: str
   return payload
 }
 
-async function downloadMarkdownFile(baseUrl: string, session: SynologySession, filePath: string): Promise<string> {
-  return downloadTextFile(baseUrl, session, filePath)
+function isMissingRemoteFolderCode(code: number | undefined): boolean {
+  return code === 408 || code === 414
+}
+
+async function downloadMarkdownFile(
+  baseUrl: string,
+  session: SynologySession,
+  filePath: string,
+  options: SynologyRequestOptions = {},
+): Promise<string> {
+  return downloadTextFile(baseUrl, session, filePath, options)
 }
 
 async function deleteFileFromSynology(baseUrl: string, session: SynologySession, filePath: string) {
@@ -343,7 +636,12 @@ async function deleteFileFromSynology(baseUrl: string, session: SynologySession,
     )
 }
 
-async function downloadTextFile(baseUrl: string, session: SynologySession, filePath: string): Promise<string> {
+async function downloadTextFile(
+  baseUrl: string,
+  session: SynologySession,
+  filePath: string,
+  options: SynologyRequestOptions = {},
+): Promise<string> {
   const url = makeAuthedSynologyUrl(baseUrl, session)
   const body = new URLSearchParams({
     api: 'SYNO.FileStation.Download',
@@ -353,7 +651,7 @@ async function downloadTextFile(baseUrl: string, session: SynologySession, fileP
     mode: 'open',
   })
 
-  const response = await fetchSynology(url, { method: 'POST', body }, 'download')
+  const response = await fetchSynology(url, { method: 'POST', body }, 'download', options)
   const text = await response.text()
 
   if (!response.ok)
@@ -377,7 +675,11 @@ async function downloadTextFile(baseUrl: string, session: SynologySession, fileP
   return text
 }
 
-async function logoutFromSynology(baseUrl: string, session: SynologySession) {
+async function logoutFromSynology(
+  baseUrl: string,
+  session: SynologySession,
+  options: SynologyRequestOptions = {},
+) {
   const url = makeAuthedSynologyUrl(baseUrl, session)
 
   const body = new URLSearchParams({
@@ -388,7 +690,7 @@ async function logoutFromSynology(baseUrl: string, session: SynologySession) {
   })
 
   try {
-    await fetchSynology(url, { method: 'POST', body }, 'logout')
+    await fetchSynology(url, { method: 'POST', body }, 'logout', options)
   } catch {
     // Logout is best-effort; upload/login errors should stay visible to the user.
   }
@@ -408,15 +710,21 @@ function getEntryMarkdownPath(baseFolder: string, entry: DiaryEntry): string {
   return `${getEntryMarkdownFolder(baseFolder, entry)}/${getEntryNasMarkdownFileName(entry)}`
 }
 
-async function fetchSynology(url: URL, init: RequestInit, phase: string): Promise<Response> {
+async function fetchSynology(
+  url: URL,
+  init: RequestInit,
+  phase: string,
+  options: SynologyRequestOptions = {},
+): Promise<Response> {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), SYNC_REQUEST_TIMEOUT_MS)
+  const requestTimeoutMs = options.requestTimeoutMs ?? SYNC_REQUEST_TIMEOUT_MS
+  const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs)
 
   try {
     return await fetch(url, { ...init, signal: controller.signal })
   } catch (error) {
     throw new SynologySyncError(
-      getFetchFailureMessage(error),
+      getFetchFailureMessage(error, requestTimeoutMs),
       phase,
       url.toString(),
       undefined,
@@ -441,12 +749,12 @@ async function parseSynologyResponse<T>(response: Response, phase: string, endpo
   }
 }
 
-function getFetchFailureMessage(error: unknown): string {
+function getFetchFailureMessage(error: unknown, requestTimeoutMs: number): string {
   if (error instanceof DOMException && error.name === 'AbortError')
-    return 'Network request timed out after 10 seconds.'
+    return `Network request timed out after ${requestTimeoutMs / 1000} seconds.`
 
   if (error instanceof Error && error.name === 'AbortError')
-    return 'Network request timed out after 10 seconds.'
+    return `Network request timed out after ${requestTimeoutMs / 1000} seconds.`
 
   if (error instanceof TypeError)
     return 'Network request failed. This is commonly caused by CORS, TLS/certificate errors, or an unreachable NAS endpoint.'

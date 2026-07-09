@@ -1,10 +1,10 @@
 import { ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../../application/tagEvents'
 import { createPortal } from 'react-dom'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../../domain/constants'
 import type { AppSettings, DiaryEntry } from '../../domain/types'
-import type { ActivityTag, CatalogDiaryTagManager, PersonTag } from '../../domain/tagModels'
 import {
   ActivityAddButton,
   ActivityAddDialog,
@@ -16,10 +16,11 @@ type EntryTagPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  clearActionLabel?: string
+  getClearableTags?: (tags: string[], draft: DiaryEntry) => string[]
   icon: ReactNode
-  manager: CatalogDiaryTagManager<ActivityTag | PersonTag>
+  manager: CatalogTagManager
   onSettingsChange: (settings: AppSettings) => void
-  onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
   onStatusChange: (message: string) => void
@@ -38,10 +39,11 @@ export function EntryTagPanel({
   draft,
   entries,
   settings,
+  clearActionLabel,
+  getClearableTags,
   icon,
   manager,
   onSettingsChange,
-  onUpdateDraft,
   onDraftChange,
   onEntriesChange,
   onStatusChange,
@@ -53,14 +55,15 @@ export function EntryTagPanel({
   const [tagPopoverPosition, setTagPopoverPosition] = useState<TagPopoverPosition | null>(null)
   const tagAddRef = useRef<HTMLDivElement>(null)
   const tagPopoverRef = useRef<HTMLDivElement>(null)
+  const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
   const currentTags = manager.getEntryNames(draft)
   const currentColors = manager.getEntryColors(draft)
-  const settingsTags = manager.getCatalog(settings)
+  const catalogTags = manager.getCatalog(settings)
+  const clearableTags = clearActionLabel ? getClearableTags?.(currentTags, draft) ?? currentTags : []
   const colorNames = manager.getColorNames(settings)
   const availableRecentTags = useMemo(() => {
     return manager.collectRecent(entries, settings)
       .filter((tag) => !currentTags.includes(tag.name))
-      .sort((a, b) => a.name.localeCompare(b.name))
   }, [currentTags, entries, manager, settings])
   const tagColorGroups = useMemo(() => {
     const groups = new Map<string, typeof availableRecentTags>()
@@ -78,6 +81,19 @@ export function EntryTagPanel({
   const visibleExpandedTagColor = tagColorGroups.some((group) => group.color === expandedTagColor)
     ? expandedTagColor
     : tagColorGroups[0]?.color ?? DEFAULT_TAG_COLOR
+
+  function applyTagEvent(event: TagEvent) {
+    const nextState = dispatchTagEvent({ settings, draft, entries }, event)
+
+    if (nextState.settings !== settings)
+      onSettingsChange(nextState.settings)
+
+    if (nextState.entries !== entries)
+      onEntriesChange(nextState.entries)
+
+    if (nextState.draft !== draft)
+      onDraftChange(nextState.draft)
+  }
 
   useEffect(() => {
     if (!isTagAddOpen)
@@ -137,16 +153,12 @@ export function EntryTagPanel({
       return
     }
 
-    const patch = manager.addToEntry(draft, tag, color)
-
-    if (!patch)
-      return
-
-    onUpdateDraft(patch)
-    onSettingsChange(manager.setCatalog(settings, {
-      ...settingsTags,
-      [tag]: { color },
-    }))
+    applyTagEvent({
+      type: 'entry-tag-added',
+      manager,
+      tag,
+      color,
+    })
     setIsTagAddOpen(false)
     setAddingTagColor(null)
   }
@@ -157,7 +169,11 @@ export function EntryTagPanel({
   }
 
   function removeTag(tag: string) {
-    onUpdateDraft(manager.removeFromEntry(draft, tag))
+    applyTagEvent({
+      type: 'entry-tags-deleted',
+      manager,
+      tags: [tag],
+    })
   }
 
   function closeTagEditor() {
@@ -173,15 +189,22 @@ export function EntryTagPanel({
     if (!nextTag)
       return
 
-    const nextEntries = entries.map((entry) => manager.updateEntryTag(entry, editingTagName, nextTag, color))
-    const nextDraft = manager.updateEntryTag(draft, editingTagName, nextTag, color)
+    const duplicateTag = manager.collect(catalogEntries, settings).find((tag) => {
+      return manager.normalizeName(tag.name) === manager.normalizeName(nextTag) && manager.normalizeName(tag.name) !== manager.normalizeName(editingTagName)
+    })
 
-    onSettingsChange(manager.setCatalog(
-      settings,
-      manager.updateCatalog(settingsTags, editingTagName, nextTag, color),
-    ))
-    onEntriesChange(nextEntries)
-    onDraftChange(nextDraft)
+    if (duplicateTag && !window.confirm(`${manager.itemLabel} "${nextTag}" already exists. Merge "${editingTagName}" into "${duplicateTag.name}"?`)) {
+      onStatusChange(`${manager.itemLabel} name already exists. Choose another name or merge it.`)
+      return
+    }
+
+    applyTagEvent({
+      type: 'catalog-tag-updated',
+      manager,
+      oldTag: editingTagName,
+      nextTag,
+      color,
+    })
     closeTagEditor()
     onStatusChange(`Updated ${manager.itemLabel.toLowerCase()} globally: ${nextTag}`)
   }
@@ -194,16 +217,43 @@ export function EntryTagPanel({
     closeTagEditor()
   }
 
+  function clearCurrentTags() {
+    if (!clearableTags.length)
+      return
+
+    applyTagEvent({
+      type: 'entry-tags-deleted',
+      manager,
+      tags: clearableTags,
+    })
+    onStatusChange(`Cleared ${manager.itemLabelPlural.toLowerCase()}.`)
+  }
+
+  function getCurrentTagColor(tag: string): string {
+    return catalogTags[manager.normalizeName(tag)]?.color ?? currentColors[tag] ?? DEFAULT_TAG_COLOR
+  }
+
   return (
     <div className={`compact-panel tag-panel ${manager.panelClassName}`.trim()}>
       <div className="compact-title">
         {icon}
         {manager.itemLabelPlural}
+        {clearActionLabel && (
+          <button
+            className="tag-panel-clear-button"
+            type="button"
+            disabled={!clearableTags.length}
+            title={clearActionLabel}
+            onClick={clearCurrentTags}
+          >
+            Clear
+          </button>
+        )}
       </div>
       <div className="activity-chips" ref={tagAddRef}>
         {currentTags.map((tag) => (
           <ActivityChipButton
-            color={currentColors[tag] ?? DEFAULT_TAG_COLOR}
+            color={getCurrentTagColor(tag)}
             key={tag}
             name={tag}
             onClick={() => setEditingTagName(tag)}
@@ -249,6 +299,7 @@ export function EntryTagPanel({
                           color={tag.color}
                           key={tag.name}
                           name={tag.name}
+                          pinned={tag.pinned}
                           onClick={() => addTag(tag.name, tag.color)}
                         />
                       ))}
@@ -280,7 +331,7 @@ export function EntryTagPanel({
       {editingTagName && (
         <ActivityEditDialog
           colorNames={colorNames}
-          initialColor={currentColors[editingTagName] ?? DEFAULT_TAG_COLOR}
+          initialColor={getCurrentTagColor(editingTagName)}
           initialName={editingTagName}
           itemLabel={manager.itemLabel}
           onCancel={closeTagEditor}

@@ -12,6 +12,7 @@ import {
   serializeDiaryEntryMarkdown,
 } from '../domain/diaryEntrySerialization'
 import type { DiaryCatalog, DiaryEntry } from '../domain/types'
+import { getNotebookKey } from './date'
 
 export { DIARY_CATALOG_FILE_NAME, WEATHER_CODES_FILE_NAME, buildDiaryCatalog }
 
@@ -28,7 +29,11 @@ export function getEntryNasMarkdownFileName(entry: DiaryEntry): string {
 }
 
 export function getEntryMarkdownFolder(baseFolder: string, entry: DiaryEntry): string {
-  const [year, month] = entry.diaryDate.split('-')
+  return getNotebookMarkdownFolder(baseFolder, getNotebookKey(entry.diaryDate))
+}
+
+export function getNotebookMarkdownFolder(baseFolder: string, notebookKey: string): string {
+  const [year, month] = notebookKey.split('-')
   const normalizedBaseFolder = normalizeRemoteFolder(baseFolder)
 
   return `${normalizedBaseFolder}/${year}/${month}`

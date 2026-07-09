@@ -1,7 +1,7 @@
 import LightningFS from '@isomorphic-git/lightning-fs'
 import * as git from 'isomorphic-git'
 import type { GitHttpRequest, GitHttpResponse } from 'isomorphic-git/http/web'
-import type { AppSettings, DiaryEntry } from '../domain/types'
+import type { AppSettings, DiaryCatalog, DiaryEntry } from '../domain/types'
 import {
   DIARY_CATALOG_FILE_NAME,
   WEATHER_CODES_FILE_NAME,
@@ -23,6 +23,8 @@ const GIT_REQUEST_TIMEOUT_MS = 10000
 
 let gitFs: LightningFS | null = null
 
+type SyncProgressCallback = (current: number, total: number, label?: string) => void
+
 const gitHttp = {
   request: requestGitHttp,
 }
@@ -39,7 +41,12 @@ export class GitSyncError extends Error {
   }
 }
 
-export async function pushEntriesToGit(entries: DiaryEntry[], settings: AppSettings, catalogEntries: DiaryEntry[]) {
+export async function pushEntriesToGit(
+  entries: DiaryEntry[],
+  settings: AppSettings,
+  catalogEntries: DiaryEntry[],
+  onProgress?: SyncProgressCallback,
+) {
   if (!entries.length)
     return
 
@@ -53,11 +60,12 @@ export async function pushEntriesToGit(entries: DiaryEntry[], settings: AppSetti
     const filepath = getEntryGitMarkdownPath(settings, entry)
     await writeRepoFile(fs, filepath, serializeDiaryEntryMarkdown(entry))
     filepaths.push(filepath)
+    onProgress?.(filepaths.length, entries.length, entry.diaryDate)
   }
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries))
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries, settings))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   filepaths.push(catalogPath, weatherCodesPath)
 
@@ -87,20 +95,40 @@ export async function pushEntriesToGit(entries: DiaryEntry[], settings: AppSetti
   )
 }
 
-export async function pullEntriesFromGit(settings: AppSettings): Promise<DiaryEntry[]> {
+export async function pullEntriesFromGit(
+  settings: AppSettings,
+  notebookKey?: string,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
+  return pullNotebookEntriesFromGit(settings, notebookKey ? [notebookKey] : undefined, onProgress)
+}
+
+export async function pullNotebookEntriesFromGit(
+  settings: AppSettings,
+  notebookKeys?: string[],
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry[]> {
   const fs = await ensureGitRepository(settings)
   await pullGit(fs, settings, false)
 
   const catalog = await readOptionalRepoFile(fs, joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME))
     .then((raw) => raw ? deserializeDiaryCatalog(raw) ?? undefined : undefined)
-  const markdownFiles = await listMarkdownFiles(fs, settings.gitDiaryPath)
-  const entries = await Promise.all(
-    markdownFiles.map(async (filepath) =>
-      deserializeDiaryEntryMarkdown(await readRepoFile(fs, filepath), getBaseName(filepath), catalog),
-    ),
-  )
+  const markdownFolders = notebookKeys?.length
+    ? notebookKeys.map((notebookKey) => getNotebookGitMarkdownFolder(settings, notebookKey))
+    : [settings.gitDiaryPath]
+  const markdownFiles = (await Promise.all(markdownFolders.map((folder) => listMarkdownFiles(fs, folder)))).flat()
+  const entries: DiaryEntry[] = []
 
-  return entries.filter((entry): entry is DiaryEntry => Boolean(entry))
+  for (const [index, filepath] of markdownFiles.entries()) {
+    const entry = deserializeDiaryEntryMarkdown(await readRepoFile(fs, filepath), getBaseName(filepath), catalog)
+
+    if (entry)
+      entries.push(entry)
+
+    onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? getBaseName(filepath))
+  }
+
+  return entries
 }
 
 export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSettings, catalogEntries: DiaryEntry[]) {
@@ -112,7 +140,7 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries))
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries, settings))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
 
   await git.add({ fs, dir: repoDir, filepath: catalogPath })
@@ -141,14 +169,59 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
   )
 }
 
+export async function pushDiaryCatalogToGit(
+  catalog: DiaryCatalog,
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+) {
+  const fs = await ensureGitRepository(settings)
+  await pullGit(fs, settings, true)
+
+  const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
+  const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalog, settings))
+  onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
+  await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
+  onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)
+
+  await git.add({ fs, dir: repoDir, filepath: catalogPath })
+  await git.add({ fs, dir: repoDir, filepath: weatherCodesPath })
+
+  if (!(await hasStagedChanges(fs)))
+    return
+
+  await git.commit({
+    fs,
+    dir: repoDir,
+    message: 'Update diary catalog',
+    author: getGitAuthor(settings),
+  })
+
+  await runGitOperation('push', () =>
+    git.push({
+      fs,
+      http: gitHttp,
+      dir: repoDir,
+      remote: 'origin',
+      ref: settings.gitBranch,
+      corsProxy: settings.gitCorsProxy || undefined,
+      onAuth: () => getGitAuth(settings),
+    }),
+  )
+}
+
 export function getGitDisplayTarget(settings: AppSettings): string {
   return `${settings.gitRemoteUrl || 'Unconfigured Git remote'}#${settings.gitBranch || 'main'}`
 }
 
 export function getEntryGitMarkdownPath(settings: AppSettings, entry: DiaryEntry): string {
-  const [year, month] = entry.diaryDate.split('-')
+  return joinGitPath(getNotebookGitMarkdownFolder(settings, entry.diaryDate.slice(0, 7)), getEntryNasMarkdownFileName(entry))
+}
 
-  return joinGitPath(settings.gitDiaryPath, year, month, getEntryNasMarkdownFileName(entry))
+function getNotebookGitMarkdownFolder(settings: AppSettings, notebookKey: string): string {
+  const [year, month] = notebookKey.split('-')
+
+  return joinGitPath(settings.gitDiaryPath, year, month)
 }
 
 async function ensureGitRepository(settings: AppSettings): Promise<LightningFS> {

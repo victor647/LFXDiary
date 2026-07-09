@@ -1,13 +1,17 @@
 import { DEFAULT_TAG_COLOR } from './constants'
 
 export function normalizeTag(value: string): string {
+  return sanitizeTag(value).split(/\s+/).filter(Boolean).map(toTitleWord).join(' ')
+}
+
+export function sanitizeTag(value: string): string {
   const words = value
     .trim()
     .replace(/['"]/g, '')
     .split(/[^a-zA-Z0-9]+/)
     .filter(Boolean)
 
-  return words.map(toTitleWord).join(' ')
+  return words.join(' ')
 }
 
 export function normalizePersonTag(value: string): string {
@@ -20,7 +24,7 @@ export function normalizePersonTag(value: string): string {
 }
 
 export function normalizeTags(tags: string[]): string[] {
-  return Array.from(new Set(tags.map(normalizeTag).filter(Boolean))).sort()
+  return Array.from(new Set(tags.map(sanitizeTag).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 export function normalizePersonTags(tags: string[]): string[] {
@@ -30,7 +34,7 @@ export function normalizePersonTags(tags: string[]): string[] {
 export function normalizeTagColors(
   tagColors: Record<string, string>,
   tags: string[],
-  normalize = normalizeTag,
+  normalize = sanitizeTag,
 ): Record<string, string> {
   const normalizedColors: Record<string, string> = {}
 

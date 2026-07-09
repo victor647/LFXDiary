@@ -18,6 +18,8 @@ export function PeoplePanel(props: PeoplePanelProps) {
   return (
     <EntryTagPanel
       {...props}
+      clearActionLabel="Clear people from this entry"
+      getClearableTags={(tags, draft) => tags.filter((tag) => draft.content.includes(tag))}
       icon={<Users size={16} />}
       manager={personTagManager}
     />

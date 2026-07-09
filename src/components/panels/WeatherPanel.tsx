@@ -1,5 +1,6 @@
 import { CloudRain, Droplets, Leaf, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { DEFAULT_CITY, periodConfig } from '../../domain/constants'
 import type { AppSettings, DiaryEntry, Period, WeatherSample } from '../../domain/types'
 import { formatCityDisplayName } from '../../utils/city'
@@ -42,7 +43,10 @@ export function WeatherPanel({
 }: WeatherPanelProps) {
   const [weatherCityByPeriod, setWeatherCityByPeriod] = useState<Record<Period, string>>(() => getWeatherCityByPeriod(draft))
   const [weatherLocationPickerPeriod, setWeatherLocationPickerPeriod] = useState<Period | null>(null)
+  const [weatherLocationPopoverPosition, setWeatherLocationPopoverPosition] = useState<WeatherLocationPopoverPosition | null>(null)
   const autoWeatherKeys = useRef<Set<string>>(new Set())
+  const weatherPinRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const weatherLocationPopoverRef = useRef<HTMLDivElement>(null)
   const temperatureColorBands = useMemo(
     () => getTemperatureColorBands(settings.temperatureThresholds),
     [settings.temperatureThresholds],
@@ -59,6 +63,59 @@ export function WeatherPanel({
       evening: validCityIds.has(current.evening) ? current.evening : firstCityId,
     }))
   }, [draft.cities])
+
+  useEffect(() => {
+    if (!weatherLocationPickerPeriod)
+      return
+
+    const pickerPeriod = weatherLocationPickerPeriod
+
+    function closeWeatherLocationPickerOnOutsideClick(event: PointerEvent) {
+      if (!(event.target instanceof Node))
+        return
+
+      const pin = weatherPinRefs.current[pickerPeriod]
+
+      if (pin?.contains(event.target) || weatherLocationPopoverRef.current?.contains(event.target))
+        return
+
+      setWeatherLocationPickerPeriod(null)
+    }
+
+    document.addEventListener('pointerdown', closeWeatherLocationPickerOnOutsideClick)
+
+    return () => document.removeEventListener('pointerdown', closeWeatherLocationPickerOnOutsideClick)
+  }, [weatherLocationPickerPeriod])
+
+  useLayoutEffect(() => {
+    if (!weatherLocationPickerPeriod)
+      return
+
+    const pickerPeriod = weatherLocationPickerPeriod
+
+    function updateWeatherLocationPopoverPosition() {
+      const pin = weatherPinRefs.current[pickerPeriod]
+
+      if (!pin)
+        return
+
+      const rect = pin.getBoundingClientRect()
+      const width = 140
+      const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))
+      const top = Math.max(12, rect.bottom + 6)
+
+      setWeatherLocationPopoverPosition({ top, left })
+    }
+
+    updateWeatherLocationPopoverPosition()
+    window.addEventListener('resize', updateWeatherLocationPopoverPosition)
+    window.addEventListener('scroll', updateWeatherLocationPopoverPosition, true)
+
+    return () => {
+      window.removeEventListener('resize', updateWeatherLocationPopoverPosition)
+      window.removeEventListener('scroll', updateWeatherLocationPopoverPosition, true)
+    }
+  }, [weatherLocationPickerPeriod])
 
   useEffect(() => {
     const autoKey = draft.id
@@ -259,6 +316,9 @@ export function WeatherPanel({
                   <small>{formatWeatherLocationLabel(draft.cities, weatherCityByPeriod[config.period])}</small>
                   <div className="weather-pin-wrap">
                     <button
+                      ref={(element) => {
+                        weatherPinRefs.current[config.period] = element
+                      }}
                       className="weather-pin-button"
                       type="button"
                       title={`Choose ${config.label} location`}
@@ -270,8 +330,12 @@ export function WeatherPanel({
                     >
                       <MapPin size={13} />
                     </button>
-                    {weatherLocationPickerPeriod === config.period && (
-                      <div className="weather-location-popover">
+                    {weatherLocationPickerPeriod === config.period && createPortal(
+                      <div
+                        className="weather-location-popover weather-location-popover-floating"
+                        ref={weatherLocationPopoverRef}
+                        style={weatherLocationPopoverPosition ?? undefined}
+                      >
                         {draft.cities.map((city) => (
                           <button
                             className={
@@ -289,7 +353,8 @@ export function WeatherPanel({
                             {formatCityDisplayName(city)}
                           </button>
                         ))}
-                      </div>
+                      </div>,
+                      document.body,
                     )}
                   </div>
                 </div>
@@ -300,6 +365,11 @@ export function WeatherPanel({
       </div>
     </div>
   )
+}
+
+type WeatherLocationPopoverPosition = {
+  top: number
+  left: number
 }
 
 type WeatherAttempt = {

@@ -7,10 +7,30 @@ import {
   STORAGE_KEY,
   emptyMood,
 } from '../domain/constants'
-import type { City, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
+import { buildDiaryCatalog, deserializeDiaryCatalog } from '../domain/diaryCatalog'
+import type { City, DiaryCatalog, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
-import { normalizePersonTag, normalizePersonTags, normalizeTag, normalizeTagColors, normalizeTags } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizeTagColors, normalizeTags, sanitizeTag } from './tags'
+
+export type DiaryMonthIndexItem = {
+  key: string
+  count: number
+  entryIds: string[]
+  updatedAt: string
+}
+
+export type DiaryMonthIndex = Record<string, DiaryMonthIndexItem>
+
+export type InitialDiaryEntries = {
+  entries: DiaryEntry[]
+  monthIndex: DiaryMonthIndex
+  monthKey: string | null
+}
+
+const MONTH_INDEX_KEY = 'lfx-diary.month-index.v1'
+const MONTH_ENTRIES_KEY_PREFIX = 'lfx-diary.entries.month.v1:'
+const DIARY_CATALOG_STORAGE_KEY = 'lfx-diary.catalog.v1'
 
 export function makeBlankEntry(): DiaryEntry {
   const now = new Date().toISOString()
@@ -39,21 +59,242 @@ export function makeBlankEntry(): DiaryEntry {
 }
 
 export function loadEntries(): DiaryEntry[] {
-  const raw = localStorage.getItem(STORAGE_KEY)
+  return loadInitialDiaryEntries().entries
+}
+
+export function loadInitialDiaryEntries(): InitialDiaryEntries {
+  const monthIndex = loadDiaryMonthIndex()
+  const monthKey = getInitialMonthKey(monthIndex)
+
+  return {
+    entries: monthKey ? loadNotebookEntries(monthKey) : [],
+    monthIndex,
+    monthKey,
+  }
+}
+
+export function loadDiaryMonthIndex(): DiaryMonthIndex {
+  migrateLegacyEntriesToMonthStorage()
+
+  const raw = localStorage.getItem(MONTH_INDEX_KEY)
+
+  if (!raw)
+    return {}
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Partial<DiaryMonthIndexItem>>
+
+    if (!parsed || typeof parsed !== 'object')
+      return {}
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([key, item]) => [key, normalizeMonthIndexItem(key, item)] as const)
+        .filter(([, item]) => item.count > 0),
+    )
+  } catch {
+    return {}
+  }
+}
+
+export function loadNotebookEntries(monthKey: string): DiaryEntry[] {
+  const raw = localStorage.getItem(getMonthEntriesKey(monthKey))
 
   if (!raw)
     return []
 
   try {
     const entries = JSON.parse(raw) as DiaryEntry[]
-    return Array.isArray(entries) ? entries.map(normalizeEntry) : []
+    return Array.isArray(entries)
+      ? entries.map(normalizeEntry).sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))
+      : []
   } catch {
     return []
   }
 }
 
+export function loadAllStoredEntries(): DiaryEntry[] {
+  const monthIndex = loadDiaryMonthIndex()
+
+  return Object.keys(monthIndex)
+    .flatMap((monthKey) => loadNotebookEntries(monthKey))
+    .sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))
+}
+
+export function loadStoredDiaryCatalog(): DiaryCatalog {
+  migrateLegacyEntriesToMonthStorage()
+
+  const raw = localStorage.getItem(DIARY_CATALOG_STORAGE_KEY)
+  const catalog = raw ? deserializeDiaryCatalog(raw) : null
+
+  if (catalog)
+    return catalog
+
+  const rebuiltCatalog = buildDiaryCatalog(loadAllStoredEntries())
+  saveStoredDiaryCatalog(rebuiltCatalog)
+  return rebuiltCatalog
+}
+
+export function saveStoredDiaryCatalog(catalog: DiaryCatalog) {
+  localStorage.setItem(DIARY_CATALOG_STORAGE_KEY, JSON.stringify(catalog))
+}
+
+export function saveLoadedEntries(entries: DiaryEntry[], loadedMonthKeys: Set<string>): DiaryMonthIndex {
+  return saveEntriesToMonthStorage(entries, loadedMonthKeys, loadDiaryMonthIndex())
+}
+
+function saveEntriesToMonthStorage(
+  entries: DiaryEntry[],
+  loadedMonthKeys: Set<string>,
+  monthIndex: DiaryMonthIndex,
+): DiaryMonthIndex {
+  const entriesByMonth = new Map<string, DiaryEntry[]>()
+  const monthsToWrite = new Set(loadedMonthKeys)
+
+  for (const entry of entries) {
+    const monthKey = getNotebookKey(entry.diaryDate)
+    monthsToWrite.add(monthKey)
+    entriesByMonth.set(monthKey, [...(entriesByMonth.get(monthKey) ?? []), normalizeEntry(entry)])
+  }
+
+  for (const monthKey of monthsToWrite) {
+    const monthEntries = (entriesByMonth.get(monthKey) ?? [])
+      .sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))
+
+    if (!monthEntries.length) {
+      localStorage.removeItem(getMonthEntriesKey(monthKey))
+      delete monthIndex[monthKey]
+      continue
+    }
+
+    localStorage.setItem(getMonthEntriesKey(monthKey), JSON.stringify(monthEntries))
+    monthIndex[monthKey] = {
+      key: monthKey,
+      count: monthEntries.length,
+      entryIds: monthEntries.map((entry) => entry.id).sort((a, b) => a.localeCompare(b)),
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
+  localStorage.setItem(MONTH_INDEX_KEY, JSON.stringify(monthIndex))
+  return monthIndex
+}
+
+export function groupEntriesByMonthIndex(monthIndex: DiaryMonthIndex, entries: DiaryEntry[]): NotebookGroup[] {
+  const entriesByMonth = new Map<string, DiaryEntry[]>()
+
+  for (const entry of entries) {
+    const monthKey = getNotebookKey(entry.diaryDate)
+    entriesByMonth.set(monthKey, [...(entriesByMonth.get(monthKey) ?? []), entry])
+  }
+
+  const years = new Map<string, Array<{ key: string; label: string; entries: DiaryEntry[]; entryCount: number; isLoaded: boolean }>>()
+
+  for (const [monthKey, item] of Object.entries(monthIndex)) {
+    const year = getNotebookYear(monthKey)
+    const monthEntries = entriesByMonth.get(monthKey) ?? []
+
+    years.set(year, [
+      ...(years.get(year) ?? []),
+      {
+        key: monthKey,
+        label: formatNotebookLabel(monthKey),
+        entries: monthEntries,
+        entryCount: monthEntries.length || item.count,
+        isLoaded: entriesByMonth.has(monthKey),
+      },
+    ])
+  }
+
+  for (const [monthKey, monthEntries] of entriesByMonth) {
+    if (monthIndex[monthKey])
+      continue
+
+    const year = getNotebookYear(monthKey)
+    years.set(year, [
+      ...(years.get(year) ?? []),
+      {
+        key: monthKey,
+        label: formatNotebookLabel(monthKey),
+        entries: monthEntries,
+        entryCount: monthEntries.length,
+        isLoaded: true,
+      },
+    ])
+  }
+
+  return Array.from(years.entries())
+    .sort(([yearA], [yearB]) => yearB.localeCompare(yearA))
+    .map(([year, months]) => ({
+      year,
+      months: months.sort((a, b) => b.key.localeCompare(a.key)),
+    }))
+}
+
+export function getMonthIndexEntryCount(monthIndex: DiaryMonthIndex, monthKey?: string | null): number {
+  if (!monthKey)
+    return Object.values(monthIndex).reduce((sum, item) => sum + item.count, 0)
+
+  return monthIndex[monthKey]?.count ?? 0
+}
+
+export function getInitialMonthKey(monthIndex: DiaryMonthIndex, today = toDateInputValue(new Date())): string | null {
+  const currentMonth = getNotebookKey(today)
+
+  if (monthIndex[currentMonth]?.count)
+    return currentMonth
+
+  return Object.keys(monthIndex)
+    .filter((monthKey) => monthKey < currentMonth)
+    .sort((a, b) => b.localeCompare(a))[0]
+    ?? Object.keys(monthIndex).sort((a, b) => b.localeCompare(a))[0]
+    ?? null
+}
+
+function migrateLegacyEntriesToMonthStorage() {
+  if (localStorage.getItem(MONTH_INDEX_KEY))
+    return
+
+  const raw = localStorage.getItem(STORAGE_KEY)
+
+  if (!raw)
+    return
+
+  try {
+    const entries = JSON.parse(raw) as DiaryEntry[]
+    if (Array.isArray(entries))
+      saveEntriesToMonthStorage(
+        entries.map(normalizeEntry),
+        new Set(entries.map((entry) => getNotebookKey(entry.diaryDate))),
+        {},
+      )
+  } catch {
+    // Ignore bad legacy storage; the new month index will start empty.
+  }
+}
+
+function normalizeMonthIndexItem(key: string, item: Partial<DiaryMonthIndexItem> | undefined): DiaryMonthIndexItem {
+  const entryIds = Array.isArray(item?.entryIds)
+    ? item.entryIds.filter((entryId): entryId is string => typeof entryId === 'string')
+    : []
+  const count = typeof item?.count === 'number' ? item.count : entryIds.length
+
+  return {
+    key,
+    count,
+    entryIds,
+    updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+  }
+}
+
+function getMonthEntriesKey(monthKey: string): string {
+  return `${MONTH_ENTRIES_KEY_PREFIX}${monthKey}`
+}
+
 export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
-  const tags = normalizeTags(entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
+  const legacyEffortMigration = getLegacyEffortTagMigration(entry)
+  const updatedAt = legacyEffortMigration ? new Date().toISOString() : entry.updatedAt ?? new Date().toISOString()
+  const tags = normalizeTags(legacyEffortMigration?.tags ?? entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
   const people = normalizePersonTags(entry.people ?? []).slice(0, MAX_PEOPLE_PER_ENTRY)
   const weatherSamples = normalizeWeatherSamples(entry.weatherSamples)
   const dailyWeatherCode =
@@ -71,11 +312,11 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
         ? entry.dailyPrecipitationMm
         : 0
 
-  const updatedAt = entry.updatedAt ?? new Date().toISOString()
   const syncedAt = entry.syncedAt ?? null
 
   return {
     ...entry,
+    content: legacyEffortMigration?.content ?? entry.content,
     tags,
     people,
     dailyWeatherCode,
@@ -86,10 +327,45 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
     personColors: normalizeTagColors(entry.personColors ?? {}, people, normalizePersonTag),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
     updatedAt,
-    savedAt: entry.savedAt ?? updatedAt ?? null,
+    savedAt: legacyEffortMigration ? updatedAt : entry.savedAt ?? updatedAt ?? null,
     syncedAt,
-    isEdited: entry.isEdited ?? (!syncedAt || syncedAt < updatedAt),
+    isEdited: legacyEffortMigration ? true : entry.isEdited ?? (!syncedAt || syncedAt < updatedAt),
   }
+}
+
+function getLegacyEffortTagMigration(entry: DiaryEntry): { content: string, tags: string[] } | null {
+  if (!isLegacyEffortTagDate(entry.diaryDate) || typeof entry.content !== 'string')
+    return null
+
+  const lines = entry.content.split(/\r?\n/)
+  const effortLines = lines.filter((line) => /^\s*Effort:\s*/i.test(line))
+
+  if (!effortLines.length)
+    return null
+
+  const rawEffort = effortLines.map((line) => line.replace(/^\s*Effort:\s*/i, '')).join(' & ')
+  const effortTags = normalizeTags(parseLegacyEffortItems(rawEffort)).slice(0, MAX_ACTIVITIES_PER_ENTRY)
+  const content = lines
+    .filter((line) => !/^\s*Effort:\s*/i.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return {
+    content,
+    tags: effortTags.length ? effortTags : entry.tags,
+  }
+}
+
+function isLegacyEffortTagDate(diaryDate: string): boolean {
+  return diaryDate >= '2025-01-01' && diaryDate < '2025-03-01'
+}
+
+function parseLegacyEffortItems(value: string): string[] {
+  return value
+    .split('&')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function normalizeWeatherSamples(samples: unknown): WeatherSample[] {
@@ -163,6 +439,8 @@ export function groupEntriesByNotebook(entries: DiaryEntry[]): NotebookGroup[] {
           key,
           label: formatNotebookLabel(key),
           entries: monthEntries,
+          entryCount: monthEntries.length,
+          isLoaded: true,
         })),
     }))
 }
@@ -204,7 +482,7 @@ export function getRecentTags(entries: DiaryEntry[]): RecentTag[] {
       continue
 
     for (const tag of entry.tags)
-      tags.set(normalizeTag(tag), entry.tagColors[tag] ?? DEFAULT_TAG_COLOR)
+      tags.set(sanitizeTag(tag), entry.tagColors[tag] ?? DEFAULT_TAG_COLOR)
   }
 
   return Array.from(tags.entries())

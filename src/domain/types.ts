@@ -64,17 +64,19 @@ export type GeocodingResult = {
 
 export type NotebookGroup = {
   year: string
-  months: Array<{ key: string; label: string; entries: DiaryEntry[] }>
+  months: Array<{ key: string; label: string; entries: DiaryEntry[]; entryCount: number; isLoaded: boolean }>
 }
 
 export type RecentTag = {
   name: string
   color: string
+  pinned?: boolean
 }
 
 export type RecentCity = {
   city: City
   color: string
+  pinned?: boolean
 }
 
 export type NasConnectionMode = 'lan' | 'public'
@@ -114,11 +116,14 @@ export type AppSettings = {
   activityColorGroupNames: Record<string, string>
   activityTags: Record<string, {
     color: string
+    pinned?: boolean
   }>
   personColorGroupNames: Record<string, string>
   peopleTags: Record<string, {
     color: string
+    pinned?: boolean
   }>
+  locationColorGroupNames: Record<string, string>
   temperatureThresholds: TemperatureThresholds
 }
 
@@ -128,11 +133,33 @@ export type DiaryCatalog = {
   locations: Record<string, {
     city: City
     color: string
+    pinned?: boolean
+    entries: string[]
   }>
   activities: Record<string, {
     color: string
+    pinned?: boolean
+    entries: string[]
   }>
   people: Record<string, {
     color: string
+    pinned?: boolean
+    entries: string[]
   }>
+}
+
+export type TagFilterKind = 'location' | 'activity' | 'person'
+
+export type TagFilter = {
+  kind: TagFilterKind | ''
+  color: string
+  tag: string
+}
+
+export type TagFilterOption = {
+  kind: TagFilterKind
+  value: string
+  name: string
+  color: string
+  colorLabel: string
 }
