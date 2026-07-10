@@ -4,6 +4,7 @@ import {
   DEFAULT_TAG_COLOR,
   MAX_ACTIVITIES_PER_ENTRY,
   MAX_PEOPLE_PER_ENTRY,
+  MAX_POINTS_OF_INTEREST_PER_ENTRY,
   STORAGE_KEY,
   emptyMood,
 } from '../domain/constants'
@@ -11,7 +12,7 @@ import { buildDiaryCatalog, deserializeDiaryCatalog } from '../domain/diaryCatal
 import type { City, DiaryCatalog, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
-import { normalizePersonTag, normalizePersonTags, normalizeTagColors, normalizeTags, sanitizeTag } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTagColors, normalizeTags, sanitizeTag } from './tags'
 
 export type DiaryMonthIndexItem = {
   key: string
@@ -49,6 +50,8 @@ export function makeBlankEntry(): DiaryEntry {
     tagColors: {},
     people: [],
     personColors: {},
+    pointsOfInterest: [],
+    pointOfInterestColors: {},
     content: '',
     createdAt: now,
     updatedAt: now,
@@ -121,6 +124,32 @@ export function loadAllStoredEntries(): DiaryEntry[] {
     .sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))
 }
 
+export function getStoredDiaryDateRangeLabel(monthIndex: DiaryMonthIndex, loadedEntries: DiaryEntry[]): string {
+  const dates = new Set<string>()
+
+  for (const [monthKey, item] of Object.entries(monthIndex)) {
+    for (const entryId of item.entryIds) {
+      if (isDiaryDateReference(entryId))
+        dates.add(entryId)
+    }
+
+    if (!Array.from(dates).some((date) => getNotebookKey(date) === monthKey)) {
+      for (const diaryDate of loadNotebookDiaryDates(monthKey))
+        dates.add(diaryDate)
+    }
+  }
+
+  for (const entry of loadedEntries)
+    dates.add(entry.diaryDate)
+
+  const sortedDates = Array.from(dates).sort((a, b) => a.localeCompare(b))
+
+  if (!sortedDates.length)
+    return 'All Entries'
+
+  return `${formatSlashDate(sortedDates[0])} - ${formatSlashDate(sortedDates[sortedDates.length - 1])}`
+}
+
 export function loadStoredDiaryCatalog(): DiaryCatalog {
   migrateLegacyEntriesToMonthStorage()
 
@@ -180,7 +209,14 @@ function saveEntriesToMonthStorage(
   return monthIndex
 }
 
-export function groupEntriesByMonthIndex(monthIndex: DiaryMonthIndex, entries: DiaryEntry[]): NotebookGroup[] {
+export function groupEntriesByMonthIndex(
+  monthIndex: DiaryMonthIndex,
+  entries: DiaryEntry[],
+  options: {
+    filteredCounts?: Map<string, number>
+    loadedMonthKeys?: Set<string>
+  } = {},
+): NotebookGroup[] {
   const entriesByMonth = new Map<string, DiaryEntry[]>()
 
   for (const entry of entries) {
@@ -193,6 +229,8 @@ export function groupEntriesByMonthIndex(monthIndex: DiaryMonthIndex, entries: D
   for (const [monthKey, item] of Object.entries(monthIndex)) {
     const year = getNotebookYear(monthKey)
     const monthEntries = entriesByMonth.get(monthKey) ?? []
+    const isLoaded = options.loadedMonthKeys?.has(monthKey) ?? entriesByMonth.has(monthKey)
+    const filteredCount = options.filteredCounts?.get(monthKey)
 
     years.set(year, [
       ...(years.get(year) ?? []),
@@ -200,8 +238,8 @@ export function groupEntriesByMonthIndex(monthIndex: DiaryMonthIndex, entries: D
         key: monthKey,
         label: formatNotebookLabel(monthKey),
         entries: monthEntries,
-        entryCount: monthEntries.length || item.count,
-        isLoaded: entriesByMonth.has(monthKey),
+        entryCount: filteredCount ?? (monthEntries.length || item.count),
+        isLoaded,
       },
     ])
   }
@@ -291,11 +329,38 @@ function getMonthEntriesKey(monthKey: string): string {
   return `${MONTH_ENTRIES_KEY_PREFIX}${monthKey}`
 }
 
+function loadNotebookDiaryDates(monthKey: string): string[] {
+  const raw = localStorage.getItem(getMonthEntriesKey(monthKey))
+
+  if (!raw)
+    return []
+
+  try {
+    const entries = JSON.parse(raw) as Array<Partial<DiaryEntry>>
+
+    if (!Array.isArray(entries))
+      return []
+
+    return Array.from(new Set(entries.map((entry) => entry.diaryDate).filter(isDiaryDateReference)))
+  } catch {
+    return []
+  }
+}
+
+function formatSlashDate(date: string): string {
+  return date.replace(/-/g, '/')
+}
+
+function isDiaryDateReference(reference: unknown): reference is string {
+  return typeof reference === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(reference)
+}
+
 export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
   const legacyEffortMigration = getLegacyEffortTagMigration(entry)
   const updatedAt = legacyEffortMigration ? new Date().toISOString() : entry.updatedAt ?? new Date().toISOString()
   const tags = normalizeTags(legacyEffortMigration?.tags ?? entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
   const people = normalizePersonTags(entry.people ?? []).slice(0, MAX_PEOPLE_PER_ENTRY)
+  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? []).slice(0, MAX_POINTS_OF_INTEREST_PER_ENTRY)
   const weatherSamples = normalizeWeatherSamples(entry.weatherSamples)
   const dailyWeatherCode =
     typeof entry.dailyWeatherCode === 'number'
@@ -319,12 +384,14 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
     content: legacyEffortMigration?.content ?? entry.content,
     tags,
     people,
+    pointsOfInterest,
     dailyWeatherCode,
     dailyWeatherText,
     dailyPrecipitationMm,
     weatherSamples,
     tagColors: normalizeTagColors(entry.tagColors ?? {}, tags),
     personColors: normalizeTagColors(entry.personColors ?? {}, people, normalizePersonTag),
+    pointOfInterestColors: normalizeTagColors(entry.pointOfInterestColors ?? {}, pointsOfInterest, normalizePointOfInterestTag),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
     updatedAt,
     savedAt: legacyEffortMigration ? updatedAt : entry.savedAt ?? updatedAt ?? null,
@@ -505,6 +572,28 @@ export function getRecentPeople(entries: DiaryEntry[]): RecentTag[] {
   }
 
   return Array.from(people.entries())
+    .map(([name, color]) => ({ name, color }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function getRecentPointsOfInterest(entries: DiaryEntry[]): RecentTag[] {
+  const cutoff = new Date()
+  cutoff.setFullYear(cutoff.getFullYear() - 1)
+  const cutoffDate = toDateInputValue(cutoff)
+  const pointsOfInterest = new Map<string, string>()
+
+  for (const entry of entries) {
+    if (entry.diaryDate < cutoffDate)
+      continue
+
+    for (const pointOfInterest of entry.pointsOfInterest ?? [])
+      pointsOfInterest.set(
+        normalizePointOfInterestTag(pointOfInterest),
+        entry.pointOfInterestColors?.[pointOfInterest] ?? DEFAULT_TAG_COLOR,
+      )
+  }
+
+  return Array.from(pointsOfInterest.entries())
     .map(([name, color]) => ({ name, color }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }

@@ -5,14 +5,19 @@ import {
   FileUp,
   FilePlus2,
   Library,
+  MapPin,
+  PersonStanding,
   Settings,
   Search,
+  Star,
   Trash2,
   Upload,
+  Users,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiaryEntry, NotebookGroup, TagFilter, TagFilterKind, TagFilterOption } from '../domain/types'
-import { getMoodBackgroundColor } from '../utils/colors'
+import { getMoodBackgroundColor, getTagBackgroundColor, getTagTextColor } from '../utils/colors'
 import { formatDiaryDate } from '../utils/date'
 import { isEntryUnsynced } from '../utils/diaryEntryHelpers'
 import { DiaryWeatherIcon, EntryTagDots } from './DiaryIcons'
@@ -27,22 +32,24 @@ type SidebarSyncTarget =
   | { kind: 'month'; key: string }
   | { kind: 'year'; year: string }
 
-const tagKindOptions: Array<{ label: string; value: TagFilterKind }> = [
-  { label: 'Locations', value: 'location' },
-  { label: 'Activities', value: 'activity' },
-  { label: 'People', value: 'person' },
+const tagKindOptions: Array<{ label: string; value: TagFilterKind; title: string }> = [
+  { label: 'Locations', value: 'location', title: 'Add location filter' },
+  { label: 'Activities', value: 'activity', title: 'Add activity filter' },
+  { label: 'People', value: 'person', title: 'Add people filter' },
+  { label: 'Points of Interest', value: 'pointOfInterest', title: 'Add point of interest filter' },
 ]
 
 type SidebarProps = {
   draftId: string
+  allEntriesLabel: string
   searchQuery: string
   searchResultCount: number
   selectedNotebook: string | null
-  selectedNotebookCount: number
   syncTarget: SidebarSyncTarget
   tagFilter: TagFilter
   tagFilterOptions: TagFilterOption[]
   notebookGroups: NotebookGroup[]
+  expandedDecades: Set<string>
   expandedYears: Set<string>
   expandedMonths: Set<string>
   isDraftDirty: boolean
@@ -59,8 +66,8 @@ type SidebarProps = {
   onOpenSettings: () => void
   onSearchChange: (query: string) => void
   onTagFilterChange: (filter: TagFilter) => void
-  onSelectNotebook: (key: string | null) => void
   onSelectEntry: (entry: DiaryEntry, notebookKey: string) => void
+  onToggleDecade: (decade: string) => void
   onToggleYear: (year: string) => void
   onToggleMonth: (monthKey: string) => void
   onOpenContextMenu: (menu: SidebarContextMenu) => void
@@ -73,14 +80,15 @@ type SidebarProps = {
 
 export function Sidebar({
   draftId,
+  allEntriesLabel,
   searchQuery,
   searchResultCount,
   selectedNotebook,
-  selectedNotebookCount,
   syncTarget,
   tagFilter,
   tagFilterOptions,
   notebookGroups,
+  expandedDecades,
   expandedYears,
   expandedMonths,
   isDraftDirty,
@@ -97,8 +105,8 @@ export function Sidebar({
   onOpenSettings,
   onSearchChange,
   onTagFilterChange,
-  onSelectNotebook,
   onSelectEntry,
+  onToggleDecade,
   onToggleYear,
   onToggleMonth,
   onOpenContextMenu,
@@ -111,7 +119,7 @@ export function Sidebar({
   const importInputRef = useRef<HTMLInputElement>(null)
   const tagFilterMenuRef = useRef<HTMLDivElement>(null)
   const [isTagFilterMenuOpen, setIsTagFilterMenuOpen] = useState(false)
-  const [activeTagKind, setActiveTagKind] = useState<TagFilterKind | null>(tagFilter.kind || null)
+  const [activeTagKind, setActiveTagKind] = useState<TagFilterKind | null>(tagFilter.kind || tagFilter.tags[0]?.kind || null)
   const [activeTagColor, setActiveTagColor] = useState<string | null>(tagFilter.color || null)
   const tagFilterMenu = useMemo(() => {
     return tagKindOptions.map((kindOption) => {
@@ -130,10 +138,12 @@ export function Sidebar({
     })
   }, [tagFilterOptions])
   const activeKindMenu = tagFilterMenu.find((item) => item.value === activeTagKind)
-  const activeColorTagOptions = activeKindMenu?.options
-    .filter((option) => activeTagColor ? option.color === activeTagColor : true)
-    .sort((a, b) => a.name.localeCompare(b.name)) ?? []
-  const tagFilterSummary = getTagFilterSummary(tagFilter, tagFilterOptions, tagKindOptions)
+  const selectedTagFilterOptions = useMemo(() => {
+    return tagFilter.tags
+      .map((selectedTag) => tagFilterOptions.find((option) => option.kind === selectedTag.kind && option.value === selectedTag.tag))
+      .filter((option): option is TagFilterOption => Boolean(option))
+  }, [tagFilter.tags, tagFilterOptions])
+  const decadeGroups = useMemo(() => groupNotebookYearsByDecade(notebookGroups), [notebookGroups])
 
   useEffect(() => {
     if (!isTagFilterMenuOpen)
@@ -154,32 +164,57 @@ export function Sidebar({
     return () => document.removeEventListener('pointerdown', closeTagFilterMenuOnOutsideClick)
   }, [isTagFilterMenuOpen])
 
-  function openTagFilterMenu() {
-    const nextOpen = !isTagFilterMenuOpen
+  function openTagFilterMenu(kind: TagFilterKind) {
+    const nextOpen = activeTagKind === kind ? !isTagFilterMenuOpen : true
 
     setIsTagFilterMenuOpen(nextOpen)
+    setActiveTagKind(kind)
 
     if (!nextOpen)
       return
 
-    const nextKind = tagFilter.kind || tagFilterMenu.find((item) => item.options.length)?.value || tagKindOptions[0].value
-    const nextKindMenu = tagFilterMenu.find((item) => item.value === nextKind)
-
-    setActiveTagKind(nextKind)
-    setActiveTagColor(tagFilter.kind === nextKind ? tagFilter.color || nextKindMenu?.colorOptions[0]?.[0] || null : nextKindMenu?.colorOptions[0]?.[0] || null)
-  }
-
-  function applyTagKind(kind: TagFilterKind) {
-    onTagFilterChange({ kind, color: '', tag: '' })
+    setActiveTagColor(tagFilterMenu.find((item) => item.value === kind)?.colorOptions[0]?.[0] || null)
   }
 
   function applyTagColor(kind: TagFilterKind, color: string) {
-    onTagFilterChange({ kind, color, tag: '' })
+    setActiveTagKind(kind)
+    setActiveTagColor(color)
   }
 
   function applyConcreteTag(option: TagFilterOption) {
-    onTagFilterChange({ kind: option.kind, color: option.color, tag: option.value })
+    if (tagFilter.tags.some((tag) => tag.kind === option.kind && tag.tag === option.value))
+      return
+
+    onTagFilterChange({
+      kind: option.kind,
+      color: option.color,
+      tag: option.value,
+      tags: [...tagFilter.tags, { kind: option.kind, tag: option.value }],
+    })
+  }
+
+  function removeConcreteTag(option: TagFilterOption) {
+    const tags = tagFilter.tags.filter((tag) => !(tag.kind === option.kind && tag.tag === option.value))
+    const lastTag = tags[tags.length - 1]
+    const lastOption = lastTag
+      ? tagFilterOptions.find((item) => item.kind === lastTag.kind && item.value === lastTag.tag)
+      : null
+
+    onTagFilterChange({
+      kind: lastOption?.kind ?? '',
+      color: lastOption?.color ?? '',
+      tag: lastOption?.value ?? '',
+      tags,
+    })
+  }
+
+  function clearTagFilters() {
+    onTagFilterChange({ kind: '', color: '', tag: '', tags: [] })
     setIsTagFilterMenuOpen(false)
+  }
+
+  function isConcreteTagSelected(option: TagFilterOption): boolean {
+    return tagFilter.tags.some((tag) => tag.kind === option.kind && tag.tag === option.value)
   }
 
   return (
@@ -238,86 +273,81 @@ export function Sidebar({
       <div className="sidebar-search-tools">
         <label className="tag-filter-row">
           <span>Tag Filter</span>
-          <div className="tag-filter-menu-wrap" ref={tagFilterMenuRef}>
-            <button
-              className={tagFilter.kind ? 'tag-filter-trigger active' : 'tag-filter-trigger'}
-              type="button"
-              onClick={openTagFilterMenu}
-            >
-              <span>{tagFilterSummary}</span>
-              <ChevronDown size={14} />
-            </button>
-            {isTagFilterMenuOpen && (
-              <div className="tag-filter-menu" role="menu">
-                <div className="tag-filter-menu-column">
-                  <button
-                    className={!tagFilter.kind ? 'selected' : ''}
-                    type="button"
-                    onClick={() => {
-                      onTagFilterChange({ kind: '', color: '', tag: '' })
-                      setIsTagFilterMenuOpen(false)
-                    }}
-                  >
-                    Any tag
-                  </button>
-                  {tagFilterMenu.map((kindOption) => (
-                    <button
-                      className={activeTagKind === kindOption.value ? 'selected' : ''}
-                      key={kindOption.value}
-                      type="button"
-                      onClick={() => applyTagKind(kindOption.value)}
-                      onMouseEnter={() => {
-                        setActiveTagKind(kindOption.value)
-                        setActiveTagColor(kindOption.colorOptions[0]?.[0] || null)
-                      }}
-                    >
-                      <span>{kindOption.label}</span>
-                      <ChevronRight size={13} />
-                    </button>
-                  ))}
-                </div>
-                {activeKindMenu && (
-                  <div className="tag-filter-menu-column">
-                    <button
-                      className={!tagFilter.color && tagFilter.kind === activeKindMenu.value ? 'selected' : ''}
-                      type="button"
-                      onClick={() => applyTagKind(activeKindMenu.value)}
-                      onMouseEnter={() => setActiveTagColor(null)}
-                    >
-                      Any color
-                    </button>
-                    {activeKindMenu.colorOptions.map(([color, label]) => (
-                      <button
-                        className={activeTagColor === color ? 'tag-filter-color-item selected' : 'tag-filter-color-item'}
+          <div className="tag-filter-menu-wrap tag-filter-icon-wrap" ref={tagFilterMenuRef}>
+            <div className="tag-filter-icon-bar">
+              {tagKindOptions.map((kindOption) => (
+                <button
+                  className={activeTagKind === kindOption.value && isTagFilterMenuOpen ? 'tag-filter-kind-button selected' : 'tag-filter-kind-button'}
+                  key={kindOption.value}
+                  type="button"
+                  title={kindOption.title}
+                  onClick={() => openTagFilterMenu(kindOption.value)}
+                >
+                  {getTagKindIcon(kindOption.value)}
+                </button>
+              ))}
+            </div>
+            {isTagFilterMenuOpen && activeKindMenu && (
+              <div className="activity-recent-popover tag-filter-selector-popover" role="menu">
+                {activeKindMenu.colorOptions.length ? (
+                  activeKindMenu.colorOptions.map(([color, label]) => {
+                    const isExpanded = color === activeTagColor
+                    const colorOptions = activeKindMenu.options
+                      .filter((option) => option.color === color)
+                      .sort((a, b) => a.name.localeCompare(b.name))
+
+                    return (
+                      <div
+                        className="activity-color-group"
                         key={color}
-                        type="button"
-                        onClick={() => applyTagColor(activeKindMenu.value, color)}
-                        onMouseEnter={() => setActiveTagColor(color)}
+                        onMouseEnter={() => applyTagColor(activeKindMenu.value, color)}
                       >
-                        <span className="tag-filter-color-dot" style={{ backgroundColor: color }} />
-                        <span>{label}</span>
-                        <ChevronRight size={13} />
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {activeKindMenu && (
-                  <div className="tag-filter-menu-column tag-filter-menu-tags">
-                    {activeColorTagOptions.length ? (
-                      activeColorTagOptions.map((option) => (
                         <button
-                          className={tagFilter.kind === option.kind && tagFilter.tag === option.value ? 'selected' : ''}
-                          key={`${option.kind}-${option.value}`}
+                          className="activity-color-toggle"
                           type="button"
-                          onClick={() => applyConcreteTag(option)}
+                          title={label}
+                          onClick={() => applyTagColor(activeKindMenu.value, color)}
                         >
-                          {option.name}
+                          <span className="activity-color-toggle-main">
+                            <span className="activity-color-dot" style={{ backgroundColor: color }} />
+                            <span>{label}</span>
+                          </span>
+                          <ChevronRight size={14} />
                         </button>
-                      ))
-                    ) : (
-                      <span className="tag-filter-menu-empty">No tags</span>
-                    )}
-                  </div>
+                        {isExpanded && (
+                          <div className="activity-color-options">
+                            {colorOptions.map((option) => (
+                              <button
+                                className={isConcreteTagSelected(option) ? 'selected' : ''}
+                                key={`${option.kind}-${option.value}`}
+                                type="button"
+                                title={option.name}
+                                style={{
+                                  backgroundColor: getTagBackgroundColor(option.color),
+                                  borderColor: option.color,
+                                  color: getTagTextColor(option.color),
+                                }}
+                                onClick={() => applyConcreteTag(option)}
+                              >
+                                {option.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <span className="tag-filter-menu-empty">No tags</span>
+                )}
+                {!!tagFilter.tags.length && (
+                  <button
+                    className="activity-other-option"
+                    type="button"
+                    onClick={clearTagFilters}
+                  >
+                    Clear filters
+                  </button>
                 )}
               </div>
             )}
@@ -334,76 +364,114 @@ export function Sidebar({
             />
           </div>
         </label>
+        {!!selectedTagFilterOptions.length && (
+          <div className="selected-tag-filters" aria-label="Selected tag filters">
+            {selectedTagFilterOptions.map((option) => (
+              <button
+                className="selected-tag-filter-chip"
+                key={`${option.kind}-${option.value}`}
+                type="button"
+                title={`Remove ${option.name}`}
+                style={{
+                  backgroundColor: getTagBackgroundColor(option.color),
+                  borderColor: option.color,
+                  color: getTagTextColor(option.color),
+                }}
+                onClick={() => removeConcreteTag(option)}
+              >
+                {getTagKindIcon(option.kind)}
+                <span>{option.name}</span>
+                <X size={12} />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="notebook-list">
-        <button
-          className={selectedNotebook ? 'notebook-all' : 'notebook-all selected'}
-          type="button"
-          onClick={() => onSelectNotebook(null)}
-        >
-          All Entries
+        <div className="notebook-range-label">
+          <span>{allEntriesLabel}</span>
           <span>{searchResultCount}</span>
-        </button>
-        {selectedNotebook && <p className="notebook-summary">{selectedNotebookCount} in selected notebook</p>}
-
-        {notebookGroups.map((group) => {
-          const isExpanded = expandedYears.has(group.year)
-          const isSelectedYear = syncTarget.kind === 'year' && syncTarget.year === group.year
+        </div>
+        {decadeGroups.map((decadeGroup) => {
+          const isDecadeExpanded = expandedDecades.has(decadeGroup.decade)
 
           return (
-            <div className="year-group" key={group.year}>
+            <div className="decade-group" key={decadeGroup.decade}>
               <button
-                className={isSelectedYear ? 'year-toggle selected' : 'year-toggle'}
+                className="decade-toggle"
                 type="button"
-                onClick={() => onToggleYear(group.year)}
+                onClick={() => onToggleDecade(decadeGroup.decade)}
               >
-                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <span>{group.year}</span>
-                <span>{group.months.reduce((sum, month) => sum + month.entryCount, 0)}</span>
+                {isDecadeExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <span>{decadeGroup.label}</span>
+                <span>{decadeGroup.groups.reduce((sum, group) => sum + group.months.reduce((monthSum, month) => monthSum + month.entryCount, 0), 0)}</span>
               </button>
 
-              {isExpanded && (
-                <div className="month-list">
-                  {group.months.map((month) => {
-                    const unsyncedCount = month.isLoaded ? month.entries.filter(isEntryUnsynced).length : 0
-                    const isSelectedMonth = syncTarget.kind === 'month' && syncTarget.key === month.key
+              {isDecadeExpanded && (
+                <div className="year-list">
+                  {decadeGroup.groups.map((group) => {
+                    const isExpanded = expandedYears.has(group.year)
+                    const isSelectedYear = syncTarget.kind === 'year' && syncTarget.year === group.year
 
                     return (
-                      <div className={isSelectedMonth ? 'month-group selected' : 'month-group'} key={month.key}>
-                        <button className="month-tab" type="button" onClick={() => onToggleMonth(month.key)}>
-                          {expandedMonths.has(month.key) ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                          <span>{month.label}</span>
-                          <span className={unsyncedCount ? 'month-count has-unsynced' : 'month-count'}>
-                            {formatMonthEntryCount(month.entryCount, unsyncedCount)}
-                          </span>
+                      <div className="year-group" key={group.year}>
+                        <button
+                          className={isSelectedYear ? 'year-toggle selected' : 'year-toggle'}
+                          type="button"
+                          onClick={() => onToggleYear(group.year)}
+                        >
+                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          <span>{group.year}</span>
+                          <span>{group.months.reduce((sum, month) => sum + month.entryCount, 0)}</span>
                         </button>
 
-                        {expandedMonths.has(month.key) &&
-                          (!selectedNotebook || selectedNotebook === month.key) &&
-                          month.entries.map((entry) => (
-                            <button
-                              className={getEntryItemClassName(entry, draftId, isDraftDirty, unsavedEntryIds)}
-                              key={entry.id}
-                              type="button"
-                              title={getEntryItemTitle(entry, draftId, isDraftDirty, unsavedEntryIds)}
-                              style={{ backgroundColor: isEntryUnsynced(entry) ? 'transparent' : getMoodBackgroundColor(entry.mood) }}
-                              onContextMenu={(event) => {
-                                event.preventDefault()
-                                onOpenContextMenu({
-                                  x: event.clientX,
-                                  y: event.clientY,
-                                  entry,
-                                })
-                              }}
-                              onClick={() => onSelectEntry(entry, month.key)}
-                            >
-                              <DiaryWeatherIcon entry={entry} />
-                              <span className="entry-date">{formatDiaryDate(entry.diaryDate)}</span>
-                              <span className="entry-word-count">{formatWordCount(entry.content)}</span>
-                              <EntryTagDots entry={entry} />
-                            </button>
-                          ))}
+                        {isExpanded && (
+                          <div className="month-list">
+                            {group.months.map((month) => {
+                              const unsyncedCount = month.isLoaded ? month.entries.filter(isEntryUnsynced).length : 0
+                              const isSelectedMonth = syncTarget.kind === 'month' && syncTarget.key === month.key
+
+                              return (
+                                <div className={isSelectedMonth ? 'month-group selected' : 'month-group'} key={month.key}>
+                                  <button className="month-tab" type="button" onClick={() => onToggleMonth(month.key)}>
+                                    {expandedMonths.has(month.key) ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                                    <span>{month.label}</span>
+                                    <span className={unsyncedCount ? 'month-count has-unsynced' : 'month-count'}>
+                                      {formatMonthEntryCount(month.entryCount, unsyncedCount)}
+                                    </span>
+                                  </button>
+
+                                  {expandedMonths.has(month.key) &&
+                                    (!selectedNotebook || selectedNotebook === month.key) &&
+                                    month.entries.map((entry) => (
+                                      <button
+                                        className={getEntryItemClassName(entry, draftId, isDraftDirty, unsavedEntryIds)}
+                                        key={entry.id}
+                                        type="button"
+                                        title={getEntryItemTitle(entry, draftId, isDraftDirty, unsavedEntryIds)}
+                                        style={{ backgroundColor: isEntryUnsynced(entry) ? 'transparent' : getMoodBackgroundColor(entry.mood) }}
+                                        onContextMenu={(event) => {
+                                          event.preventDefault()
+                                          onOpenContextMenu({
+                                            x: event.clientX,
+                                            y: event.clientY,
+                                            entry,
+                                          })
+                                        }}
+                                        onClick={() => onSelectEntry(entry, month.key)}
+                                      >
+                                        <DiaryWeatherIcon entry={entry} />
+                                        <span className="entry-date">{formatDiaryDate(entry.diaryDate)}</span>
+                                        <span className="entry-word-count">{formatWordCount(entry.content)}</span>
+                                        <EntryTagDots entry={entry} />
+                                      </button>
+                                    ))}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -452,6 +520,49 @@ export function Sidebar({
       </div>
     </aside>
   )
+}
+
+function getTagKindIcon(kind: TagFilterKind) {
+  if (kind === 'location')
+    return <MapPin size={16} />
+
+  if (kind === 'activity')
+    return <PersonStanding size={16} />
+
+  if (kind === 'person')
+    return <Users size={16} />
+
+  return <Star size={16} />
+}
+
+function groupNotebookYearsByDecade(notebookGroups: NotebookGroup[]): Array<{
+  decade: string
+  label: string
+  groups: NotebookGroup[]
+}> {
+  const groupsByDecade = new Map<string, NotebookGroup[]>()
+
+  for (const group of notebookGroups) {
+    const decade = getDecadeKey(group.year)
+    groupsByDecade.set(decade, [...(groupsByDecade.get(decade) ?? []), group])
+  }
+
+  return Array.from(groupsByDecade.entries())
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([decade, groups]) => ({
+      decade,
+      label: `${decade}-${Number(decade) + 9}`,
+      groups,
+    }))
+}
+
+function getDecadeKey(year: string): string {
+  const yearValue = Number.parseInt(year, 10)
+
+  if (!Number.isFinite(yearValue))
+    return year
+
+  return String(Math.floor(yearValue / 10) * 10)
 }
 
 function getEntryItemClassName(
@@ -509,27 +620,6 @@ function formatMonthEntryCount(entryCount: number, unsyncedCount: number): strin
     return String(entryCount)
 
   return `${entryCount} (${unsyncedCount} unsynced)`
-}
-
-function getTagFilterSummary(
-  tagFilter: TagFilter,
-  tagFilterOptions: TagFilterOption[],
-  kindOptions: Array<{ label: string; value: TagFilterKind }>,
-): string {
-  if (!tagFilter.kind)
-    return 'Any tag'
-
-  const kindLabel = kindOptions.find((option) => option.value === tagFilter.kind)?.label ?? 'Tag'
-  const selectedTag = tagFilterOptions.find((option) => option.kind === tagFilter.kind && option.value === tagFilter.tag)
-  const selectedColor = tagFilterOptions.find((option) => option.kind === tagFilter.kind && option.color === tagFilter.color)
-
-  if (selectedTag)
-    return `${kindLabel} / ${selectedTag.colorLabel} / ${selectedTag.name}`
-
-  if (tagFilter.color && selectedColor)
-    return `${kindLabel} / ${selectedColor.colorLabel}`
-
-  return kindLabel
 }
 
 function formatWordCount(content: string): string {

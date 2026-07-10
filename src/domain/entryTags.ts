@@ -1,5 +1,5 @@
 import type { DiaryEntry } from './types'
-import { normalizePersonTag, normalizePersonTags, normalizeTags, sanitizeTag } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTags, sanitizeTag } from './tags'
 
 export function updateEntryActivity(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
   return updateEntryTagSet(entry, oldTag, nextTag, color, 'tags', 'tagColors', sanitizeTag, normalizeTags)
@@ -12,6 +12,32 @@ export function updateEntryPerson(entry: DiaryEntry, oldTag: string, nextTag: st
 
   const normalizedNextTag = normalizePersonTag(nextTag)
   const nextContent = replaceTagReferences(updatedEntry.content, [normalizePersonTag(oldTag), oldTag], normalizedNextTag)
+
+  if (nextContent === updatedEntry.content)
+    return updatedEntry
+
+  return {
+    ...updatedEntry,
+    content: nextContent,
+  }
+}
+
+export function updateEntryPointOfInterest(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
+  const updatedEntry = updateEntryTagSet(
+    entry,
+    oldTag,
+    nextTag,
+    color,
+    'pointsOfInterest',
+    'pointOfInterestColors',
+    normalizePointOfInterestTag,
+    normalizePointOfInterestTags,
+  )
+  if (updatedEntry === entry)
+    return entry
+
+  const normalizedNextTag = normalizePointOfInterestTag(nextTag)
+  const nextContent = replaceTagReferences(updatedEntry.content, [normalizePointOfInterestTag(oldTag), oldTag], normalizedNextTag)
 
   if (nextContent === updatedEntry.content)
     return updatedEntry
@@ -42,8 +68,8 @@ function updateEntryTagSet(
   oldTag: string,
   nextTag: string,
   color: string,
-  tagField: 'tags' | 'people',
-  colorField: 'tagColors' | 'personColors',
+  tagField: 'tags' | 'people' | 'pointsOfInterest',
+  colorField: 'tagColors' | 'personColors' | 'pointOfInterestColors',
   normalize: (value: string) => string,
   normalizeMany: (values: string[]) => string[],
 ): DiaryEntry {

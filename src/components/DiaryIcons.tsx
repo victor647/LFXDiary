@@ -91,7 +91,7 @@ export function EntryTagDots({ entry }: { entry: DiaryEntry }) {
     return <span className="entry-tags empty">No tags</span>
 
   return (
-    <span className="entry-tags" title={entry.tags.join(', ')}>
+    <span className={entry.tags.length === 1 ? 'entry-tags single' : 'entry-tags'} title={entry.tags.join(', ')}>
       {entry.tags.slice(0, MAX_ACTIVITIES_PER_ENTRY).map((tag) => {
         const color = entry.tagColors[tag] ?? DEFAULT_TAG_COLOR
 

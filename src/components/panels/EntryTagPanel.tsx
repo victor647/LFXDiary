@@ -1,10 +1,11 @@
-import { ChevronRight } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { ChevronRight, Plus, Sparkles, X } from 'lucide-react'
+import type { DragEvent, ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../../application/tagEvents'
 import { createPortal } from 'react-dom'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../../domain/constants'
 import type { AppSettings, DiaryEntry } from '../../domain/types'
+import { reorderByKey } from '../../utils/reorder'
 import {
   ActivityAddButton,
   ActivityAddDialog,
@@ -20,6 +21,7 @@ type EntryTagPanelProps = {
   getClearableTags?: (tags: string[], draft: DiaryEntry) => string[]
   icon: ReactNode
   manager: CatalogTagManager
+  onAutoAnalyze?: () => void
   onSettingsChange: (settings: AppSettings) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
@@ -43,6 +45,7 @@ export function EntryTagPanel({
   getClearableTags,
   icon,
   manager,
+  onAutoAnalyze,
   onSettingsChange,
   onDraftChange,
   onEntriesChange,
@@ -53,7 +56,8 @@ export function EntryTagPanel({
   const [addingTagColor, setAddingTagColor] = useState<string | null>(null)
   const [expandedTagColor, setExpandedTagColor] = useState(DEFAULT_TAG_COLOR)
   const [tagPopoverPosition, setTagPopoverPosition] = useState<TagPopoverPosition | null>(null)
-  const tagAddRef = useRef<HTMLDivElement>(null)
+  const [draggingTagName, setDraggingTagName] = useState<string | null>(null)
+  const tagAddRef = useRef<HTMLSpanElement>(null)
   const tagPopoverRef = useRef<HTMLDivElement>(null)
   const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
   const currentTags = manager.getEntryNames(draft)
@@ -229,6 +233,42 @@ export function EntryTagPanel({
     onStatusChange(`Cleared ${manager.itemLabelPlural.toLowerCase()}.`)
   }
 
+  function beginTagDrag(event: DragEvent<HTMLSpanElement>, tag: string) {
+    setDraggingTagName(tag)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', tag)
+  }
+
+  function allowTagDrop(event: DragEvent<HTMLSpanElement>) {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  function dropTag(event: DragEvent<HTMLSpanElement>, targetTag: string) {
+    event.preventDefault()
+    const draggedTag = draggingTagName ?? event.dataTransfer.getData('text/plain')
+
+    if (!draggedTag || draggedTag === targetTag) {
+      setDraggingTagName(null)
+      return
+    }
+
+    const nextTags = reorderByKey(currentTags, draggedTag, targetTag, (tag) => tag)
+
+    if (nextTags === currentTags) {
+      setDraggingTagName(null)
+      return
+    }
+
+    applyTagEvent({
+      type: 'entry-tags-reordered',
+      manager,
+      tags: nextTags,
+    })
+    setDraggingTagName(null)
+    onStatusChange(`${manager.itemLabelPlural} order updated.`)
+  }
+
   function getCurrentTagColor(tag: string): string {
     return catalogTags[manager.normalizeName(tag)]?.color ?? currentColors[tag] ?? DEFAULT_TAG_COLOR
   }
@@ -238,32 +278,57 @@ export function EntryTagPanel({
       <div className="compact-title">
         {icon}
         {manager.itemLabelPlural}
-        {clearActionLabel && (
+        <span className="tag-panel-title-actions" ref={tagAddRef}>
           <button
-            className="tag-panel-clear-button"
+            className="tag-panel-title-icon-button"
             type="button"
-            disabled={!clearableTags.length}
-            title={clearActionLabel}
-            onClick={clearCurrentTags}
+            disabled={currentTags.length >= manager.maxTags}
+            title={`Add ${manager.itemLabel.toLowerCase()}`}
+            onClick={() => setIsTagAddOpen((isOpen) => !isOpen)}
           >
-            Clear
+            <Plus size={13} />
           </button>
-        )}
+          {onAutoAnalyze && (
+            <button
+              className="tag-panel-title-icon-button"
+              type="button"
+              title={`Auto analyze ${manager.itemLabelPlural.toLowerCase()}`}
+              onClick={onAutoAnalyze}
+            >
+              <Sparkles size={13} />
+            </button>
+          )}
+          {clearActionLabel && (
+            <button
+              className="tag-panel-title-icon-button"
+              type="button"
+              disabled={!clearableTags.length}
+              title={clearActionLabel}
+              onClick={clearCurrentTags}
+            >
+              <X size={13} />
+            </button>
+          )}
+        </span>
       </div>
-      <div className="activity-chips" ref={tagAddRef}>
+      <div className="activity-chips">
         {currentTags.map((tag) => (
-          <ActivityChipButton
-            color={getCurrentTagColor(tag)}
+          <span
+            className={draggingTagName === tag ? 'tag-draggable-chip dragging' : 'tag-draggable-chip'}
+            draggable={currentTags.length > 1}
             key={tag}
-            name={tag}
-            onClick={() => setEditingTagName(tag)}
-          />
+            onDragEnd={() => setDraggingTagName(null)}
+            onDragOver={allowTagDrop}
+            onDragStart={(event) => beginTagDrag(event, tag)}
+            onDrop={(event) => dropTag(event, tag)}
+          >
+            <ActivityChipButton
+              color={getCurrentTagColor(tag)}
+              name={tag}
+              onClick={() => setEditingTagName(tag)}
+            />
+          </span>
         ))}
-        <ActivityAddButton
-          disabled={currentTags.length >= manager.maxTags}
-          title={`Add ${manager.itemLabel.toLowerCase()}`}
-          onClick={() => setIsTagAddOpen((isOpen) => !isOpen)}
-        />
         {isTagAddOpen && createPortal(
           <div
             className="activity-recent-popover activity-recent-popover-floating"

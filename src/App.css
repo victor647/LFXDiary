@@ -161,6 +161,45 @@ label {
   position: relative;
 }
 
+.tag-filter-icon-wrap {
+  display: grid;
+}
+
+.tag-filter-icon-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tag-filter-kind-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  border-color: #d7dde6;
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.tag-filter-kind-button:hover,
+.tag-filter-kind-button.selected {
+  border-color: #457b9d;
+  background: #edf4f8;
+  color: #1d3557;
+}
+
+.tag-filter-selector-popover {
+  top: calc(100% + 5px);
+  right: auto;
+  left: 0;
+  width: min(240px, calc(100vw - 24px));
+}
+
+.tag-filter-selector-popover .activity-color-options button.selected {
+  box-shadow: 0 0 0 2px currentColor inset;
+}
+
 .tag-filter-trigger {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 14px;
@@ -269,6 +308,42 @@ label {
   padding-left: 32px;
 }
 
+.selected-tag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.selected-tag-filters > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.selected-tag-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 6px 0 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.selected-tag-filter-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-tag-filter-chip svg {
+  flex: 0 0 auto;
+}
+
 .notebook-list {
   display: grid;
   align-content: start;
@@ -300,7 +375,7 @@ label {
   color: #b91c1c;
 }
 
-.notebook-all,
+.decade-toggle,
 .year-toggle,
 .month-tab {
   justify-content: space-between;
@@ -309,13 +384,36 @@ label {
   padding: 0 8px;
 }
 
-.notebook-all.selected,
+.decade-toggle.selected,
 .year-toggle.selected,
 .month-group.selected > .month-tab,
 .entry-item.selected {
   border-color: #1d3557;
 }
 
+.notebook-range-label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 0 2px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.notebook-range-label span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notebook-range-label span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+.decade-group,
+.year-list,
 .year-group,
 .month-list,
 .month-group {
@@ -323,21 +421,41 @@ label {
   gap: 4px;
 }
 
+.year-list {
+  padding-left: 10px;
+}
+
 .month-list {
   padding-left: 12px;
 }
 
+.decade-toggle,
 .year-toggle {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: center;
+  justify-items: stretch;
+  text-align: left;
 }
 
+.decade-toggle span:nth-child(2),
 .year-toggle span:nth-child(2) {
-  justify-self: center;
+  justify-self: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.year-toggle span:last-child {
+.decade-toggle span:last-child,
+.year-toggle span:last-child,
+.month-count {
   justify-self: end;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .month-group .entry-item {
@@ -366,18 +484,16 @@ label {
 .month-tab {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: center;
+  justify-items: stretch;
+  text-align: left;
 }
 
 .month-tab span:nth-child(2) {
+  justify-self: start;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.month-count {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
 }
 
 .month-count.has-unsynced {
@@ -440,6 +556,10 @@ label {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.entry-tags.single .entry-tag-pill {
+  max-width: none;
 }
 
 .activity-add-toggle:disabled {
@@ -604,6 +724,9 @@ label {
 }
 
 .settings-category {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   max-width: 980px;
   padding: 6px 2px 0;
   color: var(--text-strong);
@@ -654,7 +777,7 @@ label {
 }
 
 .tag-manager-section {
-  max-width: 980px;
+  max-width: 1120px;
 }
 
 .settings-section-title {
@@ -694,31 +817,6 @@ label {
   font-weight: 700;
 }
 
-.tag-manager-clear-button {
-  margin-left: auto;
-  min-height: 28px;
-  padding: 0 10px;
-  border-color: #d7dde6;
-  background: #ffffff;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.tag-manager-clear-button:hover {
-  border-color: #9aa8ba;
-  color: var(--text-strong);
-}
-
-.tag-manager-clear-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.tag-manager-clear-button + .tag-manager-clear-button {
-  margin-left: 0;
-}
-
 .settings-mode-control {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 120px));
@@ -756,24 +854,69 @@ label {
 
 .tag-manager-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .tag-manager-list {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .tag-manager-list-title {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 5px;
+  min-height: 28px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.tag-manager-list-title-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tag-manager-clear-icon-button {
+  width: 28px;
+  min-height: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+  border-color: #d7dde6;
+  background: #ffffff;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.tag-manager-list:hover .tag-manager-clear-icon-button,
+.tag-manager-clear-icon-button:focus-visible {
+  opacity: 1;
+}
+
+.tag-manager-clear-icon-button:hover:not(:disabled) {
+  border-color: #9aa8ba;
+  color: var(--text-strong);
+}
+
+.tag-manager-clear-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
+.tag-manager-list:hover .tag-manager-clear-icon-button:disabled,
+.tag-manager-clear-icon-button:disabled:focus-visible {
+  opacity: 0.32;
 }
 
 .tag-manager-row {
@@ -854,11 +997,23 @@ label {
 .activity-manager-group {
   display: grid;
   gap: 6px;
-  min-width: 0;
+  min-width: 174px;
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fbfcfd;
+}
+
+.activity-manager-group.expanded {
+  border-color: #1d3557;
+  background: #edf4f8;
+}
+
+.tag-manager-color-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(174px, 1fr));
+  gap: 7px;
+  min-width: 0;
 }
 
 .activity-manager-group-header {
@@ -883,7 +1038,11 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  padding-left: 34px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fbfcfd;
 }
 
 .tag-manager-chip-item {
@@ -910,11 +1069,6 @@ label {
   border-bottom-left-radius: 0;
   background: #ffffff;
   color: var(--muted);
-}
-
-.activity-manager-chip-list .tag-pin-button.pinned {
-  background: #f8fafc;
-  color: #1d3557;
 }
 
 .temperature-settings-list {
@@ -968,54 +1122,48 @@ label {
   position: relative;
   z-index: 20;
   display: grid;
-  grid-template-columns:
-    240px
-    162px
-    150px
-    184px;
-  grid-template-areas:
-    'date location activities people'
-    'weather weather mood mood';
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-height: 0;
-  align-items: stretch;
   overflow-x: auto;
   overflow-y: visible;
   padding-bottom: 2px;
 }
 
-@container (min-width: 1514px) {
-  .metadata-deck {
-    grid-template-columns:
-      240px
-      162px
-      150px
-      184px
-      408px
-      340px;
-    grid-template-areas: 'date location activities people weather mood';
-  }
+.metadata-row {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
 }
 
-.date-panel {
-  grid-area: date;
+.metadata-row > * {
+  grid-area: auto;
+  min-width: 0;
 }
 
-.location-panel {
-  grid-area: location;
+.metadata-row-primary {
+  grid-template-columns: minmax(210px, 2fr) minmax(340px, 4fr) minmax(280px, 3fr);
+  min-width: 842px;
+}
+
+.metadata-row-tags {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  min-width: 698px;
+}
+
+.date-panel,
+.location-panel,
+.weather-panel,
+.activities-panel,
+.people-panel,
+.poi-panel,
+.mood-panel {
+  min-width: 0;
 }
 
 .weather-panel {
-  grid-area: weather;
-  min-width: 360px;
-}
-
-.activities-panel {
-  grid-area: activities;
-}
-
-.people-panel {
-  grid-area: people;
+  min-width: 0;
 }
 
 .tag-panel {
@@ -1025,15 +1173,14 @@ label {
 .activity-chips {
   position: relative;
   display: flex;
-  flex-direction: column;
-  flex-wrap: nowrap;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
-  min-height: 28px;
+  min-height: 24px;
   align-items: flex-start;
 }
 
-.activity-chips button,
 .activity-manager-chip-list button {
   display: inline-flex;
   align-items: center;
@@ -1048,10 +1195,40 @@ label {
   white-space: nowrap;
 }
 
+.activity-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 26px;
+  height: auto;
+  padding: 4px 9px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: left;
+}
+
+.tag-draggable-chip {
+  display: inline-flex;
+  max-width: 100%;
+  cursor: grab;
+}
+
+.tag-draggable-chip:active {
+  cursor: grabbing;
+}
+
+.tag-draggable-chip.dragging {
+  opacity: 0.55;
+}
+
 .activity-chip-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 .activity-chip-pin {
@@ -1188,11 +1365,6 @@ label {
   color: var(--muted);
 }
 
-.mood-panel {
-  grid-area: mood;
-  min-width: 340px;
-}
-
 .header-preview,
 .compact-panel,
 .entry-body {
@@ -1224,9 +1396,9 @@ label {
 .compact-panel {
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 8px;
+  padding: 7px;
 }
 
 .date-row {
@@ -1332,22 +1504,28 @@ label {
   font-weight: 700;
 }
 
-.tag-panel-clear-button {
-  margin-left: auto;
+.tag-panel-title-icon-button {
+  width: 24px;
   min-height: 24px;
-  padding: 0 7px;
+  padding: 0;
   border-color: #d7dde6;
+  background: #ffffff;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
 }
 
-.tag-panel-clear-button:hover {
+.tag-panel-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tag-panel-title-icon-button:hover:not(:disabled) {
   border-color: #9aa8ba;
   color: var(--text-strong);
 }
 
-.tag-panel-clear-button:disabled {
+.tag-panel-title-icon-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -1360,25 +1538,27 @@ label {
 
 .current-location-chips {
   display: flex;
-  flex-direction: column;
-  flex-wrap: nowrap;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 5px;
-  min-height: 28px;
+  min-height: 24px;
   align-items: start;
 }
 
 .current-location-chips button {
   min-height: 26px;
   max-width: 100%;
-  padding: 0 9px;
-  overflow: hidden;
+  height: auto;
+  padding: 4px 9px;
+  overflow-wrap: anywhere;
   border-color: #8dc6d8;
   background: #eaf8fc;
   color: #061826;
   font-size: 12px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: left;
 }
 
 .current-location-chips .location-chip {
@@ -2162,6 +2342,19 @@ label {
   border-radius: 4px;
 }
 
+.entry-mention-popover {
+  position: absolute;
+  z-index: 35;
+  min-width: 180px;
+  max-width: min(260px, calc(100% - 24px));
+}
+
+.entry-mention-popover > span {
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .entry-save-button {
   justify-self: end;
   min-width: 120px;
@@ -2203,6 +2396,10 @@ label {
   }
 
   .tag-manager-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tag-manager-color-row {
     grid-template-columns: 1fr;
   }
 

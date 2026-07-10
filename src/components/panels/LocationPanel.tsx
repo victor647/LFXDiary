@@ -1,13 +1,14 @@
-import { ChevronRight, MapPin, Pin, Search } from 'lucide-react'
+import { ChevronRight, MapPin, Pin, Plus, Search, X } from 'lucide-react'
 import { type DragEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { dispatchTagEvent, type TagEvent } from '../../application/tagEvents'
-import { DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
+import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
 import { locationTagManager } from '../../domain/tagModels'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry, RecentCity } from '../../domain/types'
 import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
 import { formatCityDisplayName, formatCityFullName, searchCitiesByName } from '../../utils/city'
 import { getLocationNameKey } from '../../utils/diaryEntryHelpers'
+import { reorderByKey } from '../../utils/reorder'
 import { ActivityAddButton } from '../ActivityTagControls'
 
 type LocationPanelProps = {
@@ -52,7 +53,7 @@ export function LocationPanel({
   const [editingLocationColor, setEditingLocationColor] = useState(DEFAULT_LOCATION_COLOR)
   const [pendingCity, setPendingCity] = useState<City | null>(null)
   const [draggingLocationId, setDraggingLocationId] = useState<string | null>(null)
-  const locationAddRef = useRef<HTMLDivElement>(null)
+  const locationAddRef = useRef<HTMLSpanElement>(null)
   const locationPopoverRef = useRef<HTMLDivElement>(null)
   const availableRecentCities = useMemo(
     () =>
@@ -217,6 +218,21 @@ export function LocationPanel({
     onStatusChange('Location changed. Fetch weather when ready.')
   }
 
+  function clearLocations() {
+    if (draft.cities.length === 1 && draft.cities[0].id === DEFAULT_CITY.id)
+      return
+
+    onUpdateDraft({
+      cities: [DEFAULT_CITY],
+      locationColors: { [DEFAULT_CITY.id]: DEFAULT_LOCATION_COLOR },
+      weatherSamples: [],
+      dailyWeatherCode: null,
+      dailyWeatherText: 'Not fetched',
+      dailyPrecipitationMm: 0,
+    })
+    onStatusChange('Cleared locations.')
+  }
+
   function openLocationEditor(city: City) {
     setEditingLocationId(city.id)
     setEditingLocationColor(draft.locationColors[city.id] ?? DEFAULT_LOCATION_COLOR)
@@ -295,17 +311,12 @@ export function LocationPanel({
       return
     }
 
-    const fromIndex = draft.cities.findIndex((city) => city.id === draggedCityId)
-    const toIndex = draft.cities.findIndex((city) => city.id === targetCityId)
+    const nextCities = reorderByKey(draft.cities, draggedCityId, targetCityId, (city) => city.id)
 
-    if (fromIndex === -1 || toIndex === -1) {
+    if (nextCities === draft.cities) {
       setDraggingLocationId(null)
       return
     }
-
-    const nextCities = [...draft.cities]
-    const [draggedCity] = nextCities.splice(fromIndex, 1)
-    nextCities.splice(toIndex, 0, draggedCity)
 
     onUpdateDraft({ cities: nextCities })
     setDraggingLocationId(null)
@@ -317,8 +328,27 @@ export function LocationPanel({
       <div className="compact-title">
         <MapPin size={16} />
         Location
+        <span className="tag-panel-title-actions" ref={locationAddRef}>
+          <button
+            className="tag-panel-title-icon-button"
+            type="button"
+            title="Add location"
+            onClick={() => setIsLocationAddOpen((isOpen) => !isOpen)}
+          >
+            <Plus size={13} />
+          </button>
+          <button
+            className="tag-panel-title-icon-button"
+            type="button"
+            disabled={draft.cities.length === 1 && draft.cities[0].id === DEFAULT_CITY.id}
+            title="Clear locations from this entry"
+            onClick={clearLocations}
+          >
+            <X size={13} />
+          </button>
+        </span>
       </div>
-      <div className="current-location-block" ref={locationAddRef}>
+      <div className="current-location-block">
         <div className="current-location-chips">
           {draft.cities.map((city) => (
             <button
@@ -341,10 +371,6 @@ export function LocationPanel({
               {formatCityDisplayName(city)}
             </button>
           ))}
-          <ActivityAddButton
-            title="Add location"
-            onClick={() => setIsLocationAddOpen((isOpen) => !isOpen)}
-          />
           {isLocationAddOpen && createPortal(
             <div
               className="activity-recent-popover activity-recent-popover-floating"

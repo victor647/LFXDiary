@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const nasPublicTarget = process.env.LFX_DIARY_NAS_PUBLIC_URL || 'https://www.lafaxi647.cn:5001'
+const nasLanTarget = process.env.LFX_DIARY_NAS_LAN_URL || 'https://192.168.0.2:5001'
+
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
@@ -8,13 +11,13 @@ export default defineConfig({
   server: {
     proxy: {
       '/nas-public-api': {
-        target: 'https://www.lafaxi647.cn:5001',
+        target: nasPublicTarget,
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/nas-public-api/, ''),
       },
       '/nas-lan-api': {
-        target: 'https://192.168.0.2:5001',
+        target: nasLanTarget,
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/nas-lan-api/, ''),

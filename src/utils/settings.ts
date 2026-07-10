@@ -38,6 +38,8 @@ export const defaultSettings: AppSettings = {
   activityTags: {},
   personColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
   peopleTags: {},
+  pointOfInterestColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
+  pointOfInterestTags: {},
   locationColorGroupNames: DEFAULT_ACTIVITY_COLOR_GROUP_NAMES,
   temperatureThresholds: DEFAULT_TEMPERATURE_THRESHOLDS,
 }
@@ -95,6 +97,8 @@ export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     activityTags: normalizeActivityTags(settings.activityTags ?? {}),
     personColorGroupNames: normalizeActivityColorGroupNames(settings.personColorGroupNames ?? settings.activityColorGroupNames ?? {}),
     peopleTags: normalizeActivityTags(settings.peopleTags ?? {}),
+    pointOfInterestColorGroupNames: normalizeActivityColorGroupNames(settings.pointOfInterestColorGroupNames ?? settings.locationColorGroupNames ?? settings.activityColorGroupNames ?? {}),
+    pointOfInterestTags: normalizeActivityTags(settings.pointOfInterestTags ?? {}),
     locationColorGroupNames: normalizeActivityColorGroupNames(settings.locationColorGroupNames ?? settings.activityColorGroupNames ?? {}),
     temperatureThresholds: normalizeTemperatureThresholds(settings.temperatureThresholds ?? getLegacyTemperatureThresholds(legacySettings.temperatureColorBands)),
   }

@@ -4,14 +4,15 @@ import {
   LOCATION_COLOR_PALETTE,
   MAX_ACTIVITIES_PER_ENTRY,
   MAX_PEOPLE_PER_ENTRY,
+  MAX_POINTS_OF_INTEREST_PER_ENTRY,
   periodConfig,
 } from '../domain/constants'
 import type { AppSettings, City, DiaryEntry, MoodScore, Period, RecentTag } from '../domain/types'
 import { formatCityDisplayName, searchCitiesByName } from './city'
 import { getDailyWeatherFields } from './diaryEntryHelpers'
-import { getRecentCities, getRecentPeople, getRecentTags, normalizeLocationColors } from './entries'
+import { getRecentCities, getRecentPeople, getRecentPointsOfInterest, getRecentTags, normalizeLocationColors } from './entries'
 import { normalizeSettings } from './settings'
-import { normalizePersonTag, normalizePersonTags, normalizeTag, normalizeTags } from './tags'
+import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTag, normalizeTags } from './tags'
 import { fetchWeatherSample } from './weather'
 
 export type EvernoteImportDraft = {
@@ -187,6 +188,8 @@ export async function createDiaryEntryFromEvernoteImport(
     tagColors,
     people: peopleResult.people,
     personColors,
+    pointsOfInterest: [],
+    pointOfInterestColors: {},
     content: draft.content,
     createdAt: now,
     updatedAt: now,
@@ -445,6 +448,57 @@ function resolveImportedTags(summaryItems: string[], entries: DiaryEntry[], sett
   }
 }
 
+export function analyzeActivitiesFromContent(content: string, entries: DiaryEntry[], settings: AppSettings) {
+  const summaryItems = extractActivityItemsFromContent(content)
+  const existingTags = getExistingActivityTags(entries, settings)
+  const matchedContentTags = existingTags
+    .filter((tag) => contentIncludesActivityTag(content, tag.name))
+    .map((tag) => tag.name)
+
+  return resolveImportedTags([...summaryItems, ...matchedContentTags], entries, settings)
+}
+
+export function analyzePeopleFromContent(content: string, entries: DiaryEntry[], settings: AppSettings) {
+  return resolveImportedPeople(content, entries, settings)
+}
+
+export function analyzePointsOfInterestFromContent(
+  content: string,
+  people: string[],
+  entries: DiaryEntry[],
+  settings: AppSettings,
+) {
+  const existingPointsOfInterest = getExistingPointOfInterestTags(entries, settings)
+  const excludedPeople = new Set(people.map(normalizePersonTag).filter(Boolean))
+  const pointsOfInterest: string[] = []
+  const addedPointsOfInterest: string[] = []
+  const pointOfInterestColors: Record<string, string> = {}
+
+  for (const rawPointOfInterest of extractChinesePointOfInterestCandidates(content)) {
+    const pointOfInterest = normalizePointOfInterestTag(rawPointOfInterest)
+
+    if (!pointOfInterest || excludedPeople.has(normalizePersonTag(pointOfInterest)))
+      continue
+
+    const match = existingPointsOfInterest.find((tag) => normalizePointOfInterestTag(tag.name) === pointOfInterest)
+    pointOfInterestColors[pointOfInterest] = match?.color ?? DEFAULT_TAG_COLOR
+
+    if (!match)
+      addedPointsOfInterest.push(pointOfInterest)
+
+    pointsOfInterest.push(pointOfInterest)
+  }
+
+  const normalizedPointsOfInterest = normalizePointOfInterestTags(pointsOfInterest).slice(0, MAX_POINTS_OF_INTEREST_PER_ENTRY)
+
+  return {
+    pointsOfInterest: normalizedPointsOfInterest,
+    addedPointsOfInterest: normalizePointOfInterestTags(addedPointsOfInterest)
+      .filter((pointOfInterest) => normalizedPointsOfInterest.includes(pointOfInterest)),
+    pointOfInterestColors,
+  }
+}
+
 function resolveImportedPeople(content: string, entries: DiaryEntry[], settings: AppSettings) {
   const existingPeople = getExistingPeopleTags(entries, settings)
   const people: string[] = []
@@ -475,6 +529,29 @@ function resolveImportedPeople(content: string, entries: DiaryEntry[], settings:
   }
 }
 
+function extractActivityItemsFromContent(content: string): string[] {
+  const items: string[] = []
+
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^(Summary|Effort|Activities?):\s*(.*)$/i)
+
+    if (match?.[2])
+      items.push(...parseSummaryItems(match[2]))
+  }
+
+  return items
+}
+
+function contentIncludesActivityTag(content: string, tag: string): boolean {
+  const normalizedContent = content.toLowerCase()
+  const normalizedTag = tag.toLowerCase()
+
+  if (!normalizedTag)
+    return false
+
+  return normalizedContent.includes(normalizedTag)
+}
+
 function getExistingActivityTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
   const tags = new Map<string, string>()
 
@@ -499,6 +576,18 @@ function getExistingPeopleTags(entries: DiaryEntry[], settings: AppSettings): Re
   return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
 }
 
+function getExistingPointOfInterestTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
+  const tags = new Map<string, string>()
+
+  for (const tag of getRecentPointsOfInterest(entries))
+    tags.set(tag.name, tag.color)
+
+  for (const [name, tag] of Object.entries(settings.pointOfInterestTags))
+    tags.set(name, tag.color)
+
+  return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+}
+
 function extractChinesePeopleFromEnglishText(content: string): string[] {
   const people = new Set<string>()
   const paragraphs = content.split(/\n{1,}/)
@@ -512,6 +601,15 @@ function extractChinesePeopleFromEnglishText(content: string): string[] {
   }
 
   return Array.from(people)
+}
+
+function extractChinesePointOfInterestCandidates(content: string): string[] {
+  const pointsOfInterest = new Set<string>()
+
+  for (const match of content.matchAll(/(?<![\u3400-\u9fff])[\u3400-\u9fff]{2,12}(?![\u3400-\u9fff])/g))
+    pointsOfInterest.add(match[0])
+
+  return Array.from(pointsOfInterest)
 }
 
 function findBestActivityTag(rawItem: string, tags: RecentTag[]): RecentTag | null {

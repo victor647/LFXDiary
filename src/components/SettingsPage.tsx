@@ -11,9 +11,11 @@ import {
   Network,
   PersonStanding,
   Pin,
+  RotateCcw,
   Save,
-  Search,
   Tags,
+  Search,
+  Star,
   Thermometer,
   Upload,
   Users,
@@ -21,20 +23,24 @@ import {
 import type { ReactNode } from 'react'
 import { useMemo, useRef, useState } from 'react'
 import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../application/tagEvents'
-import { LOCATION_COLOR_PALETTE } from '../domain/constants'
+import { DEFAULT_CITY, LOCATION_COLOR_PALETTE } from '../domain/constants'
 import {
   activityTagManager,
   locationTagManager,
   personTagManager,
+  pointOfInterestTagManager,
   type ActivityTag,
   type DiaryTag,
   type LocationTag,
   type PersonTag,
+  type PointOfInterestTag,
   type TagColorGroup,
 } from '../domain/tagModels'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry } from '../domain/types'
+import { getCityCatalogKey } from '../domain/metadata/locationMetadata'
 import { toDateInputValue } from '../utils/date'
 import { formatCityFullName, searchCitiesByName } from '../utils/city'
+import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
 import {
   getActiveNasUrl,
   getTemperatureColorBands,
@@ -67,6 +73,7 @@ type SettingsPageProps = {
 
 type ActivityTagItem = ActivityTag
 type PeopleTagItem = PersonTag
+type PointOfInterestTagItem = PointOfInterestTag
 type LocationTagItem = LocationTag
 type CatalogManager = CatalogTagManager
 
@@ -92,15 +99,24 @@ export function SettingsPage({
   const isNasSync = settings.syncProvider === 'nas'
   const isGitSync = settings.syncProvider === 'git'
   const maxBirthDate = toDateInputValue(new Date())
-  const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
-  const activityTags = useMemo(() => activityTagManager.collect(catalogEntries, settings), [catalogEntries, settings])
+  const activityTags = useMemo(() => activityTagManager.collectFromCatalog(diaryCatalog.activities, settings), [diaryCatalog.activities, settings])
   const activityColorGroups = useMemo(() => activityTagManager.groupTags(activityTags, settings), [activityTags, settings])
-  const peopleTags = useMemo(() => personTagManager.collect(catalogEntries, settings), [catalogEntries, settings])
+  const peopleTags = useMemo(() => personTagManager.collectFromCatalog(diaryCatalog.people, settings), [diaryCatalog.people, settings])
   const peopleColorGroups = useMemo(() => personTagManager.groupTags(peopleTags, settings), [peopleTags, settings])
+  const pointOfInterestTags = useMemo(
+    () => pointOfInterestTagManager.collectFromCatalog(diaryCatalog.pointsOfInterest, settings),
+    [diaryCatalog.pointsOfInterest, settings],
+  )
+  const pointOfInterestColorGroups = useMemo(
+    () => pointOfInterestTagManager.groupTags(pointOfInterestTags, settings),
+    [pointOfInterestTags, settings],
+  )
   const locationTags = useMemo(() => locationTagManager.collectFromCatalog(diaryCatalog), [diaryCatalog])
   const locationColorGroups = useMemo(() => locationTagManager.groupTags(locationTags, settings), [locationTags, settings])
   const unusedActivityTagCount = activityTags.filter((tag) => tag.count === 0).length
   const unusedPeopleTagCount = peopleTags.filter((tag) => tag.count === 0).length
+  const unusedPointOfInterestTagCount = pointOfInterestTags.filter((tag) => tag.count === 0).length
+  const unusedLocationTagCount = locationTags.filter((tag) => tag.count === 0 && tag.key !== getCityCatalogKey(DEFAULT_CITY)).length
   const temperatureColorBands = useMemo(
     () => getTemperatureColorBands(settings.temperatureThresholds),
     [settings.temperatureThresholds],
@@ -111,6 +127,9 @@ export function SettingsPage({
   const [addingPeopleColor, setAddingPeopleColor] = useState<string | null>(null)
   const [editingPeopleTag, setEditingPeopleTag] = useState<PeopleTagItem | null>(null)
   const [expandedPeopleManagerColor, setExpandedPeopleManagerColor] = useState<string | null>(null)
+  const [addingPointOfInterestColor, setAddingPointOfInterestColor] = useState<string | null>(null)
+  const [editingPointOfInterestTag, setEditingPointOfInterestTag] = useState<PointOfInterestTagItem | null>(null)
+  const [expandedPointOfInterestManagerColor, setExpandedPointOfInterestManagerColor] = useState<string | null>(null)
   const [editingLocationTag, setEditingLocationTag] = useState<LocationTagItem | null>(null)
   const [expandedLocationManagerColor, setExpandedLocationManagerColor] = useState<string | null>(null)
   const catalogImportInputRef = useRef<HTMLInputElement>(null)
@@ -155,12 +174,32 @@ export function SettingsPage({
     updateCatalogGroupName(personTagManager, color, name)
   }
 
+  function applyPointOfInterestTag(oldTag: string, nextName: string, color: string) {
+    applyCatalogTag(pointOfInterestTagManager, oldTag, nextName, color, () => setEditingPointOfInterestTag(null))
+  }
+
+  function addPointOfInterestTag(rawTag: string, color: string) {
+    addCatalogTag(pointOfInterestTagManager, rawTag, color, () => setAddingPointOfInterestColor(null))
+  }
+
+  function updatePointOfInterestGroupName(color: string, name: string) {
+    updateCatalogGroupName(pointOfInterestTagManager, color, name)
+  }
+
   function deletePeopleTag(tag: string) {
     deleteCatalogTag(personTagManager, tag, () => setEditingPeopleTag(null))
   }
 
+  function deletePointOfInterestTag(tag: string) {
+    deleteCatalogTag(pointOfInterestTagManager, tag, () => setEditingPointOfInterestTag(null))
+  }
+
   function clearUnusedPeopleTags() {
     clearUnusedCatalogTags(personTagManager, editingPeopleTag, () => setEditingPeopleTag(null))
+  }
+
+  function clearUnusedPointOfInterestTags() {
+    clearUnusedCatalogTags(pointOfInterestTagManager, editingPointOfInterestTag, () => setEditingPointOfInterestTag(null))
   }
 
   function deleteActivityTag(tag: string) {
@@ -169,6 +208,34 @@ export function SettingsPage({
 
   function clearUnusedActivityTags() {
     clearUnusedCatalogTags(activityTagManager, editingActivityTag, () => setEditingActivityTag(null))
+  }
+
+  function clearUnusedLocationTags() {
+    const defaultLocationKey = getCityCatalogKey(DEFAULT_CITY)
+    const unusedLocationKeys = locationTags
+      .filter((tag) => tag.count === 0 && tag.key !== defaultLocationKey)
+      .map((tag) => tag.key)
+
+    if (!unusedLocationKeys.length) {
+      onStatusChange('No unused location tags.')
+      return
+    }
+
+    const locations = { ...diaryCatalog.locations }
+
+    for (const key of unusedLocationKeys)
+      delete locations[key]
+
+    onDiaryCatalogChange({
+      ...diaryCatalog,
+      updatedAt: new Date().toISOString(),
+      locations,
+    })
+
+    if (editingLocationTag && unusedLocationKeys.includes(editingLocationTag.key))
+      setEditingLocationTag(null)
+
+    onStatusChange(`Cleared ${unusedLocationKeys.length} unused location ${unusedLocationKeys.length === 1 ? 'tag' : 'tags'}.`)
   }
 
   function updateActivityPin(tag: ActivityTagItem, pinned: boolean) {
@@ -181,6 +248,10 @@ export function SettingsPage({
 
   function updatePeoplePin(tag: PeopleTagItem, pinned: boolean) {
     applyCatalogTagPin(personTagManager, tag.name, pinned)
+  }
+
+  function updatePointOfInterestPin(tag: PointOfInterestTagItem, pinned: boolean) {
+    applyCatalogTagPin(pointOfInterestTagManager, tag.name, pinned)
   }
 
   function updateLocationPin(tag: LocationTagItem, pinned: boolean) {
@@ -233,7 +304,7 @@ export function SettingsPage({
       return
     }
 
-    const duplicateTag = manager.collect(catalogEntries, settings).find((tag) => {
+    const duplicateTag = getManagerTags(manager).find((tag) => {
       return manager.normalizeName(tag.name) === manager.normalizeName(nextTag) && manager.normalizeName(tag.name) !== manager.normalizeName(oldTag)
     })
 
@@ -266,7 +337,7 @@ export function SettingsPage({
       return
     }
 
-    if (manager.collect(catalogEntries, settings).some((tag) => tag.name === nextTag)) {
+    if (getManagerTags(manager).some((tag) => tag.name === nextTag)) {
       onStatusChange(`${manager.itemLabel} already exists: ${nextTag}`)
       return
     }
@@ -297,7 +368,7 @@ export function SettingsPage({
 
   function deleteCatalogTag(manager: CatalogManager, tag: string, clearEditingTag: () => void) {
     const normalizedTag = manager.normalizeName(tag)
-    const usageCount = manager.collect(catalogEntries, settings).find((item) => manager.normalizeName(item.name) === normalizedTag)?.count ?? 0
+    const usageCount = getManagerTags(manager).find((item) => manager.normalizeName(item.name) === normalizedTag)?.count ?? 0
 
     if (usageCount > 0 && !window.confirm(`Delete ${manager.itemLabel.toLowerCase()} "${tag}" from ${usageCount} ${usageCount === 1 ? 'entry' : 'entries'}?`))
       return
@@ -311,8 +382,12 @@ export function SettingsPage({
     onStatusChange(`Deleted ${manager.itemLabel.toLowerCase()}: ${tag}`)
   }
 
-  function clearUnusedCatalogTags(manager: CatalogManager, editingTag: ActivityTagItem | PeopleTagItem | null, clearEditingTag: () => void) {
-    const unusedTags = manager.collect(catalogEntries, settings).filter((tag) => tag.count === 0).map((tag) => tag.name)
+  function clearUnusedCatalogTags(
+    manager: CatalogManager,
+    editingTag: ActivityTagItem | PeopleTagItem | PointOfInterestTagItem | null,
+    clearEditingTag: () => void,
+  ) {
+    const unusedTags = getManagerTags(manager).filter((tag) => tag.count === 0).map((tag) => tag.name)
 
     if (!unusedTags.length) {
       onStatusChange(`No unused ${manager.itemLabel.toLowerCase()} tags.`)
@@ -329,6 +404,16 @@ export function SettingsPage({
       clearEditingTag()
 
     onStatusChange(`Cleared ${unusedTags.length} unused ${manager.itemLabel.toLowerCase()} ${unusedTags.length === 1 ? 'tag' : 'tags'}.`)
+  }
+
+  function getManagerTags(manager: CatalogManager): Array<ActivityTagItem | PeopleTagItem | PointOfInterestTagItem> {
+    if (manager === activityTagManager)
+      return activityTags
+
+    if (manager === personTagManager)
+      return peopleTags
+
+    return pointOfInterestTags
   }
 
   function commitTagManagerSettings(nextSettings: AppSettings) {
@@ -400,7 +485,10 @@ export function SettingsPage({
       <div className="settings-body">
         <div className="settings-category settings-category-personal" hidden={!isSettingsPage}>Personal Information</div>
         <div className="settings-category settings-category-sync" hidden={!isSettingsPage}>Network Sync</div>
-        <div className="settings-category settings-category-tags" hidden={!isCatalogPage}>Tags & Catalog</div>
+        <div className="settings-category settings-category-tags" hidden={!isCatalogPage}>
+          <Tags size={14} />
+          Tag Manager
+        </div>
         <div className="settings-category settings-category-weather" hidden={!isSettingsPage}>Weather</div>
 
         <div className="settings-section settings-sync-provider-section" hidden={!isSettingsPage}>
@@ -624,28 +712,6 @@ export function SettingsPage({
       </div>
 
       <div className="settings-section tag-manager-section settings-tags-section" hidden={!isCatalogPage}>
-        <div className="settings-section-title">
-          <Tags size={16} />
-          Tag Manager
-          <button
-            className="tag-manager-clear-button"
-            type="button"
-            disabled={!unusedActivityTagCount}
-            title="Clear activity tags that are not used by any diary entry"
-            onClick={clearUnusedActivityTags}
-          >
-            Clear Unused Activities
-          </button>
-          <button
-            className="tag-manager-clear-button"
-            type="button"
-            disabled={!unusedPeopleTagCount}
-            title="Clear people tags that are not used by any diary entry"
-            onClick={clearUnusedPeopleTags}
-          >
-            Clear Unused People
-          </button>
-        </div>
         <div className="tag-manager-grid">
           <TagManagerList
             addLabel="activity"
@@ -655,7 +721,9 @@ export function SettingsPage({
             groups={activityColorGroups}
             icon={<PersonStanding size={15} />}
             title="Activities"
+            unusedCount={unusedActivityTagCount}
             onAdd={(color) => setAddingActivityColor(color)}
+            onClearUnused={clearUnusedActivityTags}
             onExpandedColorChange={setExpandedActivityManagerColor}
             onGroupNameChange={updateActivityGroupName}
             onPinChange={updateActivityPin}
@@ -670,11 +738,30 @@ export function SettingsPage({
             groups={peopleColorGroups}
             icon={<Users size={15} />}
             title="People"
+            unusedCount={unusedPeopleTagCount}
             onAdd={(color) => setAddingPeopleColor(color)}
+            onClearUnused={clearUnusedPeopleTags}
             onExpandedColorChange={setExpandedPeopleManagerColor}
             onGroupNameChange={updatePeopleGroupName}
             onPinChange={updatePeoplePin}
             onTagClick={setEditingPeopleTag}
+          />
+
+          <TagManagerList
+            addLabel="point of interest"
+            colorNames={pointOfInterestTagManager.getColorNames(settings)}
+            emptyLabel="No points of interest"
+            expandedColor={expandedPointOfInterestManagerColor}
+            groups={pointOfInterestColorGroups}
+            icon={<Star size={15} />}
+            title="Points of Interest"
+            unusedCount={unusedPointOfInterestTagCount}
+            onAdd={(color) => setAddingPointOfInterestColor(color)}
+            onClearUnused={clearUnusedPointOfInterestTags}
+            onExpandedColorChange={setExpandedPointOfInterestManagerColor}
+            onGroupNameChange={updatePointOfInterestGroupName}
+            onPinChange={updatePointOfInterestPin}
+            onTagClick={setEditingPointOfInterestTag}
           />
 
           <TagManagerList
@@ -684,6 +771,8 @@ export function SettingsPage({
             groups={locationColorGroups}
             icon={<MapPin size={15} />}
             title="Locations"
+            unusedCount={unusedLocationTagCount}
+            onClearUnused={clearUnusedLocationTags}
             onExpandedColorChange={setExpandedLocationManagerColor}
             onGroupNameChange={updateLocationGroupName}
             onPinChange={updateLocationPin}
@@ -818,6 +907,26 @@ export function SettingsPage({
           onCancel={() => setEditingPeopleTag(null)}
           onDelete={() => deletePeopleTag(editingPeopleTag.name)}
           onSave={(name, color) => applyPeopleTag(editingPeopleTag.name, name, color)}
+        />
+      )}
+      {isCatalogPage && addingPointOfInterestColor && (
+        <ActivityAddDialog
+          colorNames={settings.pointOfInterestColorGroupNames}
+          initialColor={addingPointOfInterestColor}
+          itemLabel="Point of Interest"
+          onAdd={addPointOfInterestTag}
+          onCancel={() => setAddingPointOfInterestColor(null)}
+        />
+      )}
+      {isCatalogPage && editingPointOfInterestTag && (
+        <ActivityEditDialog
+          colorNames={settings.pointOfInterestColorGroupNames}
+          initialColor={editingPointOfInterestTag.color}
+          initialName={editingPointOfInterestTag.name}
+          itemLabel="Point of Interest"
+          onCancel={() => setEditingPointOfInterestTag(null)}
+          onDelete={() => deletePointOfInterestTag(editingPointOfInterestTag.name)}
+          onSave={(name, color) => applyPointOfInterestTag(editingPointOfInterestTag.name, name, color)}
         />
       )}
       {isCatalogPage && editingLocationTag && (
@@ -966,7 +1075,9 @@ type TagManagerListProps<TTag extends DiaryTag> = {
   groups: TagColorGroup<TTag>[]
   icon: ReactNode
   title: string
+  unusedCount?: number
   onAdd?: (color: string) => void
+  onClearUnused?: () => void
   onExpandedColorChange: (color: string | null) => void
   onGroupNameChange: (color: string, name: string) => void
   onPinChange: (tag: TTag, pinned: boolean) => void
@@ -981,77 +1092,105 @@ function TagManagerList<TTag extends DiaryTag>({
   groups,
   icon,
   title,
+  unusedCount = 0,
   onAdd,
+  onClearUnused,
   onExpandedColorChange,
   onGroupNameChange,
   onPinChange,
   onTagClick,
 }: TagManagerListProps<TTag>) {
+  const expandedGroup = groups.find((group) => group.color === expandedColor) ?? null
+
   return (
     <div className="tag-manager-list">
       <div className="tag-manager-list-title">
-        {icon}
-        {title}
+        <span className="tag-manager-list-title-label">
+          {icon}
+          {title}
+        </span>
+        {onClearUnused && (
+          <button
+            className="tag-manager-clear-icon-button"
+            type="button"
+            disabled={!unusedCount}
+            title={unusedCount ? `Clear ${unusedCount} unused ${title.toLowerCase()}` : `No unused ${title.toLowerCase()}`}
+            onClick={onClearUnused}
+          >
+            <RotateCcw size={13} />
+          </button>
+        )}
       </div>
       {groups.length ? (
-        groups.map((group) => {
-          const isExpanded = group.color === expandedColor
+        <>
+          <div className="tag-manager-color-row">
+            {groups.map((group) => {
+              const isExpanded = group.color === expandedColor
 
-          return (
-            <div className="activity-manager-group" key={group.color}>
-              <div className="activity-manager-group-header">
-                <button
-                  className="tag-manager-icon-button"
-                  type="button"
-                  title={isExpanded ? `Collapse ${group.name}` : `Expand ${group.name}`}
-                  onClick={() => onExpandedColorChange(isExpanded ? null : group.color)}
-                >
-                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </button>
-                <span
-                  className="tag-manager-swatch"
-                  style={{ backgroundColor: group.color }}
-                  title={group.name}
-                />
-                <input
-                  aria-label={`${title} group ${group.name}`}
-                  value={colorNames[group.color] ?? group.name}
-                  onChange={(event) => onGroupNameChange(group.color, event.target.value)}
-                />
-                <span className="tag-manager-count">{group.tags.length}</span>
-              </div>
-              {isExpanded && (
-                <div className="activity-manager-chip-list">
-                  {group.tags.map((tag) => (
-                    <span className={tag.pinned ? 'tag-manager-chip-item pinned' : 'tag-manager-chip-item'} key={tag.key}>
-                      <ActivityChipButton
-                        count={tag.count}
-                        color={tag.color}
-                        name={tag.name}
-                        pinned={tag.pinned}
-                        onClick={() => onTagClick(tag)}
-                      />
-                      <button
-                        className={tag.pinned ? 'tag-pin-button pinned' : 'tag-pin-button'}
-                        type="button"
-                        title={tag.pinned ? `Unpin ${tag.name}` : `Pin ${tag.name}`}
-                        onClick={() => onPinChange(tag, !tag.pinned)}
-                      >
-                        <Pin size={12} />
-                      </button>
-                    </span>
-                  ))}
-                  {onAdd && (
-                    <ActivityAddButton
-                      title={`Add ${addLabel ?? title.toLowerCase()} to ${group.name}`}
-                      onClick={() => onAdd(group.color)}
+              return (
+                <div className={isExpanded ? 'activity-manager-group expanded' : 'activity-manager-group'} key={group.color}>
+                  <div className="activity-manager-group-header">
+                    <button
+                      className="tag-manager-icon-button"
+                      type="button"
+                      title={isExpanded ? `Collapse ${group.name}` : `Expand ${group.name}`}
+                      onClick={() => onExpandedColorChange(isExpanded ? null : group.color)}
+                    >
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                    <span
+                      className="tag-manager-swatch"
+                      style={{ backgroundColor: group.color }}
+                      title={group.name}
                     />
-                  )}
+                    <input
+                      aria-label={`${title} group ${group.name}`}
+                      value={colorNames[group.color] ?? group.name}
+                      onChange={(event) => onGroupNameChange(group.color, event.target.value)}
+                    />
+                    <span className="tag-manager-count">{group.tags.length}</span>
+                  </div>
                 </div>
+              )
+            })}
+          </div>
+          {expandedGroup && (
+            <div className="activity-manager-chip-list">
+              {expandedGroup.tags.map((tag) => (
+                <span className={tag.pinned ? 'tag-manager-chip-item pinned' : 'tag-manager-chip-item'} key={tag.key}>
+                  <ActivityChipButton
+                    count={tag.count}
+                    color={tag.color}
+                    name={tag.name}
+                    pinned={tag.pinned}
+                    onClick={() => onTagClick(tag)}
+                  />
+                  <button
+                    className={tag.pinned ? 'tag-pin-button pinned' : 'tag-pin-button'}
+                    type="button"
+                    style={tag.pinned
+                      ? {
+                          backgroundColor: getTagBackgroundColor(tag.color),
+                          borderColor: tag.color,
+                          color: getTagTextColor(tag.color),
+                        }
+                      : undefined}
+                    title={tag.pinned ? `Unpin ${tag.name}` : `Pin ${tag.name}`}
+                    onClick={() => onPinChange(tag, !tag.pinned)}
+                  >
+                    <Pin size={12} />
+                  </button>
+                </span>
+              ))}
+              {onAdd && (
+                <ActivityAddButton
+                  title={`Add ${addLabel ?? title.toLowerCase()} to ${expandedGroup.name}`}
+                  onClick={() => onAdd(expandedGroup.color)}
+                />
               )}
             </div>
-          )
-        })
+          )}
+        </>
       ) : (
         <p className="tag-manager-empty">{emptyLabel}</p>
       )}

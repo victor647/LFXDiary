@@ -10,6 +10,7 @@ export const DEFAULT_GIT_BRANCH = 'main'
 export const DEFAULT_GIT_DIARY_PATH = 'Diary'
 export const MAX_ACTIVITIES_PER_ENTRY = 6
 export const MAX_PEOPLE_PER_ENTRY = 12
+export const MAX_POINTS_OF_INTEREST_PER_ENTRY = 12
 
 export const TAG_COLOR_PALETTE = [
   '#f97066',

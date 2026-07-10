@@ -12,6 +12,7 @@ import { SyncProgressDialog } from './components/SyncProgressDialog'
 import { UnsavedCloseDialog } from './components/UnsavedCloseDialog'
 import { getDiarySyncAdapter } from './application/diarySync'
 import type { DiarySyncAdapter } from './application/diarySync'
+import { DEFAULT_TAG_COLOR, MAX_PEOPLE_PER_ENTRY } from './domain/constants'
 import {
   DIARY_CATALOG_FILE_NAME,
   applyDiaryCatalogToSettings,
@@ -22,7 +23,7 @@ import {
   syncDiaryCatalogEntry,
 } from './domain/diaryCatalog'
 import { serializeDiaryEntryMarkdown } from './domain/diaryEntrySerialization'
-import { activityTagManager, locationTagManager, personTagManager } from './domain/tagModels'
+import { activityTagManager, locationTagManager, personTagManager, pointOfInterestTagManager } from './domain/tagModels'
 import type { AppSettings, DiaryCatalog, DiaryEntry, TagFilter, TagFilterOption } from './domain/types'
 import { formatDiaryDate, getNotebookKey, getNotebookYear, toDateInputValue } from './utils/date'
 import {
@@ -33,6 +34,7 @@ import {
 } from './utils/diaryEntryHelpers'
 import {
   groupEntriesByMonthIndex,
+  getStoredDiaryDateRangeLabel,
   getMonthIndexEntryCount,
   loadAllStoredEntries,
   loadInitialDiaryEntries,
@@ -52,7 +54,7 @@ import {
 } from './utils/files'
 import { loadSettings, normalizeSettings, saveSettings } from './utils/settings'
 import { formatSyncErrorLog } from './utils/syncErrorLog'
-import { normalizePersonTag, normalizePersonTags, normalizeTagColors, normalizeTags } from './utils/tags'
+import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTagColors, normalizeTags } from './utils/tags'
 
 type PullConflict = {
   localEntry: DiaryEntry
@@ -92,7 +94,7 @@ export function DiaryApp() {
   const [diaryCatalog, setDiaryCatalog] = useState<DiaryCatalog>(loadStoredDiaryCatalog)
   const [draft, setDraft] = useState<DiaryEntry>(() => entries[0] ?? makeBlankEntry())
   const [searchQuery, setSearchQuery] = useState('')
-  const [tagFilter, setTagFilter] = useState<TagFilter>({ kind: '', color: '', tag: '' })
+  const [tagFilter, setTagFilter] = useState<TagFilter>({ kind: '', color: '', tag: '', tags: [] })
   const [statusMessage, setStatusMessage] = useState('Ready')
   const [syncErrorLog, setSyncErrorLog] = useState<string | null>(null)
   const [selectedNotebook, setSelectedNotebook] = useState<string | null>(initialDiaryLoad.monthKey)
@@ -108,6 +110,7 @@ export function DiaryApp() {
   const [pushedDiaryDates, setPushedDiaryDates] = useState<string[] | null>(null)
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
   const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false)
+  const [expandedDecades, setExpandedDecades] = useState<Set<string>>(() => new Set([getDecadeKey(getNotebookYear(initialNotebookKey))]))
   const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([getNotebookYear(initialNotebookKey)]))
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set(initialDiaryLoad.monthKey ? [initialDiaryLoad.monthKey] : []))
   const allowCloseRef = useRef(false)
@@ -120,6 +123,7 @@ export function DiaryApp() {
 
   const tagFilterOptions = useMemo(() => getTagFilterOptions(diaryCatalog, settings), [diaryCatalog, settings])
   const tagFilterEntryReferences = useMemo(() => getTagFilterEntryReferences(diaryCatalog, tagFilter), [diaryCatalog, tagFilter])
+  const hasSearchFilter = Boolean(searchQuery.trim() || tagFilter.tags.length)
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
 
@@ -135,28 +139,30 @@ export function DiaryApp() {
       return contentText.includes(query)
     })
   }, [searchQuery, sortedEntries, tagFilterEntryReferences])
+  const filteredMonthEntryCounts = useMemo(
+    () => getFilteredMonthEntryCounts(searchResults, tagFilterEntryReferences, searchQuery.trim()),
+    [searchQuery, searchResults, tagFilterEntryReferences],
+  )
 
-  const notebookEntries = useMemo(() => {
-    if (!selectedNotebook)
-      return searchResults
-
-    return searchResults.filter((entry) => getNotebookKey(entry.diaryDate) === selectedNotebook)
-  }, [searchResults, selectedNotebook])
-
-  const notebookGroups = useMemo(() => groupEntriesByMonthIndex(monthIndex, searchResults), [monthIndex, searchResults])
-  const hasSearchFilter = Boolean(searchQuery.trim() || tagFilter.kind)
-  const sidebarSearchResultCount = hasSearchFilter ? searchResults.length : getMonthIndexEntryCount(monthIndex)
-  const selectedNotebookCount = selectedNotebook
-    ? hasSearchFilter ? notebookEntries.length : getMonthIndexEntryCount(monthIndex, selectedNotebook)
-    : notebookEntries.length
+  const notebookGroups = useMemo(
+    () => groupEntriesByMonthIndex(monthIndex, searchResults, {
+      filteredCounts: hasSearchFilter ? filteredMonthEntryCounts : undefined,
+      loadedMonthKeys,
+    }),
+    [filteredMonthEntryCounts, hasSearchFilter, loadedMonthKeys, monthIndex, searchResults],
+  )
+  const sidebarSearchResultCount = hasSearchFilter ? sumMonthEntryCounts(filteredMonthEntryCounts) : getMonthIndexEntryCount(monthIndex)
+  const allEntriesLabel = useMemo(() => getStoredDiaryDateRangeLabel(monthIndex, entries), [entries, monthIndex])
   const draftSavedEntry = useMemo(() => entries.find((entry) => entry.id === draft.id), [draft.id, entries])
   const isDraftDirty = !draftSavedEntry || draftSavedEntry.updatedAt !== draft.updatedAt
   const editedEntryCount = useMemo(() => getEditedEntryCount(entries, draft), [draft, entries])
   const unsavedEntryIds = useMemo(() => getUnsavedEntryIds(entries, draft), [draft, entries])
   const unuploadedEntryCount = useMemo(() => getUnuploadedEntryCount(entries, draft), [draft, entries])
-  const richTextPeople = useMemo(() => {
+  const richTextTags = useMemo(() => {
     const people = new Set<string>()
     const personColors: Record<string, string> = {}
+    const pointsOfInterest = new Set<string>()
+    const pointOfInterestColors: Record<string, string> = {}
 
     for (const rawPerson of draft.people ?? []) {
       const person = normalizePersonTag(rawPerson)
@@ -172,17 +178,38 @@ export function DiaryApp() {
         personColors[person] = color
     }
 
+    for (const rawPointOfInterest of draft.pointsOfInterest ?? []) {
+      const pointOfInterest = normalizePointOfInterestTag(rawPointOfInterest)
+
+      if (!pointOfInterest)
+        continue
+
+      const color =
+        getSettingsPointOfInterestColor(settings, pointOfInterest) ?? draft.pointOfInterestColors?.[pointOfInterest]
+
+      pointsOfInterest.add(pointOfInterest)
+
+      if (color)
+        pointOfInterestColors[pointOfInterest] = color
+    }
+
     return {
       people: Array.from(people),
       personColors,
+      pointsOfInterest: Array.from(pointsOfInterest),
+      pointOfInterestColors,
     }
-  }, [draft.people, draft.personColors, settings])
+  }, [draft.people, draft.personColors, draft.pointOfInterestColors, draft.pointsOfInterest, settings])
+  const peopleMentionOptions = useMemo(
+    () => getPeopleMentionOptions(settings, diaryCatalog, draft),
+    [diaryCatalog, draft, settings],
+  )
   const hasUnsavedEntries = isDraftDirty || unsavedEntryIds.size > 0
   const closeUnsavedCount = hasUnsavedEntries ? Math.max(1, unsavedEntryIds.size) : 0
   const sidebarStatusMessage = getSidebarStatusMessage(unsavedEntryIds.size, unuploadedEntryCount) ?? statusMessage
 
   useEffect(() => {
-    setDraft((current) => syncEntryPersonColors(current, settings))
+    setDraft((current) => syncEntryRichTextTagColors(current, settings))
   }, [draft.id, settings])
 
   useEffect(() => {
@@ -224,6 +251,24 @@ export function DiaryApp() {
         updatedAt: new Date().toISOString(),
         isEdited: true,
       }
+    })
+  }
+
+  function mentionPerson(person: { name: string; color: string }, content: string) {
+    const normalizedPerson = normalizePersonTag(person.name)
+
+    if (!normalizedPerson) {
+      updateDraft({ content })
+      return
+    }
+
+    updateDraft({
+      content,
+      people: normalizePersonTags([...draft.people, normalizedPerson]).slice(0, MAX_PEOPLE_PER_ENTRY),
+      personColors: {
+        ...draft.personColors,
+        [normalizedPerson]: person.color || DEFAULT_TAG_COLOR,
+      },
     })
   }
 
@@ -388,7 +433,7 @@ export function DiaryApp() {
     if (didSave)
       applyEntries(localEntries)
 
-    applyDraft(syncEntryPersonColors(nextEntry, settings))
+    applyDraft(syncEntryRichTextTagColors(nextEntry, settings))
 
     if (didSave)
       setStatusMessage(`Auto-saved ${formatDiaryDate(savedDraft.diaryDate)}. Opened ${formatDiaryDate(nextEntry.diaryDate)}.`)
@@ -491,6 +536,19 @@ export function DiaryApp() {
     }
   }
 
+  function toggleDecade(decade: string) {
+    setExpandedDecades((current) => {
+      const next = new Set(current)
+
+      if (next.has(decade))
+        next.delete(decade)
+      else
+        next.add(decade)
+
+      return next
+    })
+  }
+
   function toggleYear(year: string) {
     setSyncTarget({ kind: 'year', year })
     setSelectedNotebook(null)
@@ -531,12 +589,14 @@ export function DiaryApp() {
 
     if (target.kind === 'month') {
       setSelectedNotebook(target.key)
+      setExpandedDecades((current) => new Set([...current, getDecadeKey(getNotebookYear(target.key))]))
       setExpandedYears((current) => new Set([...current, getNotebookYear(target.key)]))
       setExpandedMonths((current) => new Set([...current, target.key]))
       return
     }
 
     setSelectedNotebook(null)
+    setExpandedDecades((current) => new Set([...current, getDecadeKey(target.year)]))
     setExpandedYears((current) => new Set([...current, target.year]))
   }
 
@@ -971,14 +1031,15 @@ export function DiaryApp() {
     <main className="app-shell">
       <Sidebar
         draftId={draft.id}
+        allEntriesLabel={allEntriesLabel}
         searchQuery={searchQuery}
         searchResultCount={sidebarSearchResultCount}
         selectedNotebook={selectedNotebook}
-        selectedNotebookCount={selectedNotebookCount}
         syncTarget={syncTarget}
         tagFilter={tagFilter}
         tagFilterOptions={tagFilterOptions}
         notebookGroups={notebookGroups}
+        expandedDecades={expandedDecades}
         expandedYears={expandedYears}
         expandedMonths={expandedMonths}
         isDraftDirty={isDraftDirty}
@@ -997,8 +1058,8 @@ export function DiaryApp() {
         onOpenSettings={() => setCurrentPage('settings')}
         onSearchChange={setSearchQuery}
         onTagFilterChange={setTagFilter}
-        onSelectNotebook={setSelectedNotebook}
         onSelectEntry={selectEntry}
+        onToggleDecade={toggleDecade}
         onToggleYear={toggleYear}
         onToggleMonth={toggleMonth}
         onOpenContextMenu={setContextMenu}
@@ -1051,9 +1112,14 @@ export function DiaryApp() {
 
             <EntryEditor
               content={draft.content}
-              people={richTextPeople.people}
-              personColors={richTextPeople.personColors}
+              people={richTextTags.people}
+              peopleOptions={peopleMentionOptions}
+              personColorGroupNames={settings.personColorGroupNames}
+              personColors={richTextTags.personColors}
+              pointsOfInterest={richTextTags.pointsOfInterest}
+              pointOfInterestColors={richTextTags.pointOfInterestColors}
               onContentChange={(content) => updateDraft({ content })}
+              onPersonMention={mentionPerson}
               saveLabel={editedEntryCount > 1 ? 'Save All' : 'Save'}
               onSave={saveEditedEntries}
             />
@@ -1129,15 +1195,22 @@ export function DiaryApp() {
 function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
   const normalizedTags = normalizeTags(entry.tags)
   const normalizedPeople = normalizePersonTags(entry.people ?? [])
+  const normalizedPointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
   const normalizedCities = normalizeLocationColors(entry.locationColors, entry.cities)
 
   return {
     ...entry,
     tags: normalizedTags,
     people: normalizedPeople,
+    pointsOfInterest: normalizedPointsOfInterest,
     ...getNormalizedDailyWeatherFields(entry),
     tagColors: normalizeTagColors(entry.tagColors, normalizedTags),
     personColors: normalizeTagColors(entry.personColors ?? {}, normalizedPeople, normalizePersonTag),
+    pointOfInterestColors: normalizeTagColors(
+      entry.pointOfInterestColors ?? {},
+      normalizedPointsOfInterest,
+      normalizePointOfInterestTag,
+    ),
     locationColors: normalizedCities,
     updatedAt: savedAt,
     savedAt,
@@ -1146,9 +1219,11 @@ function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
   }
 }
 
-function syncEntryPersonColors(entry: DiaryEntry, settings: AppSettings): DiaryEntry {
+function syncEntryRichTextTagColors(entry: DiaryEntry, settings: AppSettings): DiaryEntry {
   const people = normalizePersonTags(entry.people ?? [])
   const personColors: Record<string, string> = {}
+  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
+  const pointOfInterestColors: Record<string, string> = {}
 
   for (const person of people) {
     const color = getSettingsPersonColor(settings, person) ?? entry.personColors?.[person]
@@ -1157,13 +1232,27 @@ function syncEntryPersonColors(entry: DiaryEntry, settings: AppSettings): DiaryE
       personColors[person] = color
   }
 
-  if (areStringArraysEqual(entry.people ?? [], people) && areRecordsEqual(entry.personColors ?? {}, personColors))
+  for (const pointOfInterest of pointsOfInterest) {
+    const color = getSettingsPointOfInterestColor(settings, pointOfInterest) ?? entry.pointOfInterestColors?.[pointOfInterest]
+
+    if (color)
+      pointOfInterestColors[pointOfInterest] = color
+  }
+
+  if (
+    areStringArraysEqual(entry.people ?? [], people)
+    && areStringArraysEqual(entry.pointsOfInterest ?? [], pointsOfInterest)
+    && areRecordsEqual(entry.personColors ?? {}, personColors)
+    && areRecordsEqual(entry.pointOfInterestColors ?? {}, pointOfInterestColors)
+  )
     return entry
 
   return {
     ...entry,
     people,
     personColors,
+    pointsOfInterest,
+    pointOfInterestColors,
   }
 }
 
@@ -1190,10 +1279,74 @@ function getTagFilterOptions(catalog: DiaryCatalog, settings: AppSettings): TagF
       color: person.color,
       colorLabel: personTagManager.getColorGroupName(settings, person.color),
     })),
+    ...Object.entries(catalog.pointsOfInterest).map(([name, pointOfInterest]) => ({
+      kind: 'pointOfInterest' as const,
+      value: name,
+      name,
+      color: pointOfInterest.color,
+      colorLabel: pointOfInterestTagManager.getColorGroupName(settings, pointOfInterest.color),
+    })),
   ]
 }
 
+function getFilteredMonthEntryCounts(
+  searchResults: DiaryEntry[],
+  tagFilterEntryReferences: Set<string> | null,
+  searchQuery: string,
+): Map<string, number> {
+  const datesByMonth = new Map<string, Set<string>>()
+
+  if (tagFilterEntryReferences && !searchQuery) {
+    for (const reference of tagFilterEntryReferences) {
+      if (isDiaryDateReference(reference))
+        addFilteredMonthDate(datesByMonth, reference)
+    }
+  }
+
+  for (const entry of searchResults)
+    addFilteredMonthDate(datesByMonth, entry.diaryDate)
+
+  return new Map(
+    Array.from(datesByMonth.entries()).map(([monthKey, dates]) => [monthKey, dates.size]),
+  )
+}
+
+function addFilteredMonthDate(datesByMonth: Map<string, Set<string>>, diaryDate: string) {
+  const monthKey = getNotebookKey(diaryDate)
+  datesByMonth.set(monthKey, new Set([...(datesByMonth.get(monthKey) ?? []), diaryDate]))
+}
+
+function sumMonthEntryCounts(monthCounts: Map<string, number>): number {
+  return Array.from(monthCounts.values()).reduce((sum, count) => sum + count, 0)
+}
+
+function isDiaryDateReference(reference: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(reference)
+}
+
+function getDecadeKey(year: string): string {
+  const yearValue = Number.parseInt(year, 10)
+
+  if (!Number.isFinite(yearValue))
+    return year
+
+  return String(Math.floor(yearValue / 10) * 10)
+}
+
 function getTagFilterEntryReferences(catalog: DiaryCatalog, filter: TagFilter): Set<string> | null {
+  if (filter.tags.length) {
+    let matchingReferences: Set<string> | null = null
+
+    for (const selectedTag of filter.tags) {
+      const tagReferences = getConcreteTagEntryReferences(catalog, selectedTag.kind, selectedTag.tag)
+      matchingReferences = matchingReferences
+        ? intersectEntryReferences(matchingReferences, tagReferences)
+        : tagReferences
+    }
+
+    return matchingReferences ?? new Set()
+  }
+
   if (!filter.kind)
     return null
 
@@ -1223,15 +1376,68 @@ function getTagFilterEntryReferences(catalog: DiaryCatalog, filter: TagFilter): 
     return entryReferences
   }
 
-  for (const [name, person] of Object.entries(catalog.people)) {
+  if (filter.kind === 'person') {
+    for (const [name, person] of Object.entries(catalog.people)) {
+      const nameMatches = !filter.tag || name === filter.tag
+      const colorMatches = !filter.color || person.color === filter.color
+
+      if (nameMatches && colorMatches)
+        addEntryReferences(entryReferences, person.entries)
+    }
+
+    return entryReferences
+  }
+
+  for (const [name, pointOfInterest] of Object.entries(catalog.pointsOfInterest)) {
     const nameMatches = !filter.tag || name === filter.tag
-    const colorMatches = !filter.color || person.color === filter.color
+    const colorMatches = !filter.color || pointOfInterest.color === filter.color
 
     if (nameMatches && colorMatches)
-      addEntryReferences(entryReferences, person.entries)
+      addEntryReferences(entryReferences, pointOfInterest.entries)
   }
 
   return entryReferences
+}
+
+function getConcreteTagEntryReferences(catalog: DiaryCatalog, kind: TagFilter['kind'], tag: string): Set<string> {
+  const entryReferences = new Set<string>()
+
+  if (!kind)
+    return entryReferences
+
+  if (kind === 'location') {
+    const location = catalog.locations[tag]
+    if (location)
+      addEntryReferences(entryReferences, location.entries)
+
+    return entryReferences
+  }
+
+  if (kind === 'activity') {
+    const activity = catalog.activities[tag]
+    if (activity)
+      addEntryReferences(entryReferences, activity.entries)
+
+    return entryReferences
+  }
+
+  if (kind === 'person') {
+    const person = catalog.people[tag]
+    if (person)
+      addEntryReferences(entryReferences, person.entries)
+
+    return entryReferences
+  }
+
+  const pointOfInterest = catalog.pointsOfInterest[tag]
+  if (pointOfInterest)
+    addEntryReferences(entryReferences, pointOfInterest.entries)
+
+  return entryReferences
+}
+
+function intersectEntryReferences(left: Set<string>, right: Set<string>): Set<string> {
+  return new Set(Array.from(left).filter((reference) => right.has(reference)))
 }
 
 function addEntryReferences(entryReferences: Set<string>, references: string[]) {
@@ -1264,11 +1470,51 @@ function getSyncTargetPullSource(adapter: DiarySyncAdapter, settings: AppSetting
   return `${adapter.label} ${target.year}`
 }
 
+function getPeopleMentionOptions(settings: AppSettings, catalog: DiaryCatalog, draft: DiaryEntry): Array<{ name: string; color: string }> {
+  const people = new Map<string, string>()
+
+  for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
+    const person = normalizePersonTag(rawName)
+
+    if (person)
+      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  }
+
+  for (const [rawName, tag] of Object.entries(catalog.people)) {
+    const person = normalizePersonTag(rawName)
+
+    if (person && !people.has(person))
+      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  }
+
+  for (const rawPerson of draft.people ?? []) {
+    const person = normalizePersonTag(rawPerson)
+
+    if (person)
+      people.set(person, draft.personColors?.[rawPerson] ?? people.get(person) ?? DEFAULT_TAG_COLOR)
+  }
+
+  return Array.from(people.entries())
+    .map(([name, color]) => ({ name, color }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 function getSettingsPersonColor(settings: AppSettings, person: string): string | null {
   const normalizedPerson = normalizePersonTag(person)
 
   for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
     if (normalizePersonTag(rawName) === normalizedPerson)
+      return tag.color
+  }
+
+  return null
+}
+
+function getSettingsPointOfInterestColor(settings: AppSettings, pointOfInterest: string): string | null {
+  const normalizedPointOfInterest = normalizePointOfInterestTag(pointOfInterest)
+
+  for (const [rawName, tag] of Object.entries(settings.pointOfInterestTags)) {
+    if (normalizePointOfInterestTag(rawName) === normalizedPointOfInterest)
       return tag.color
   }
 

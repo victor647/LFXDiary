@@ -1,4 +1,4 @@
-import { Pin, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { DEFAULT_ACTIVITY_COLOR_GROUP_NAMES, DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
 import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
@@ -36,7 +36,7 @@ type ActivityEditDialogProps = {
   onSave: (name: string, color: string) => void
 }
 
-export function ActivityChipButton({ name, color, count, pinned, onClick }: ActivityChipButtonProps) {
+export function ActivityChipButton({ name, color, count, onClick }: ActivityChipButtonProps) {
   return (
     <button
       type="button"
@@ -48,7 +48,6 @@ export function ActivityChipButton({ name, color, count, pinned, onClick }: Acti
       }}
       onClick={onClick}
     >
-      {pinned && <Pin className="activity-chip-pin" size={11} />}
       <span className="activity-chip-name">{name}</span>
       {typeof count === 'number' && <span className="activity-chip-count">{count}</span>}
     </button>

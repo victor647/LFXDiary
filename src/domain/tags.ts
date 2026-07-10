@@ -23,12 +23,25 @@ export function normalizePersonTag(value: string): string {
   return normalizeTag(trimmed)
 }
 
+export function normalizePointOfInterestTag(value: string): string {
+  return value
+    .trim()
+    .replace(/['"]/g, '')
+    .replace(/[^\u3400-\u9fffa-zA-Z0-9 ]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function normalizeTags(tags: string[]): string[] {
-  return Array.from(new Set(tags.map(sanitizeTag).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  return Array.from(new Set(tags.map(sanitizeTag).filter(Boolean)))
 }
 
 export function normalizePersonTags(tags: string[]): string[] {
-  return Array.from(new Set(tags.map(normalizePersonTag).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+  return Array.from(new Set(tags.map(normalizePersonTag).filter(Boolean)))
+}
+
+export function normalizePointOfInterestTags(tags: string[]): string[] {
+  return Array.from(new Set(tags.map(normalizePointOfInterestTag).filter(Boolean)))
 }
 
 export function normalizeTagColors(

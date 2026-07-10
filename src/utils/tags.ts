@@ -1,6 +1,8 @@
 export {
   normalizePersonTag,
   normalizePersonTags,
+  normalizePointOfInterestTag,
+  normalizePointOfInterestTags,
   sanitizeTag,
   normalizeTag,
   normalizeTagColors,

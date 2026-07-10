@@ -1,7 +1,7 @@
-import { DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY, MAX_PEOPLE_PER_ENTRY, TAG_COLOR_PALETTE } from './constants'
+import { DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY, MAX_PEOPLE_PER_ENTRY, MAX_POINTS_OF_INTEREST_PER_ENTRY, TAG_COLOR_PALETTE } from './constants'
 import { formatCityDisplayName } from './city'
-import { updateEntryActivity, updateEntryPerson } from './entryTags'
-import { normalizePersonTag, normalizePersonTags, normalizeTags, sanitizeTag } from './tags'
+import { updateEntryActivity, updateEntryPerson, updateEntryPointOfInterest } from './entryTags'
+import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTags, sanitizeTag } from './tags'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry } from './types'
 
 export type TagColorGroup<TTag extends DiaryTag> = {
@@ -11,9 +11,10 @@ export type TagColorGroup<TTag extends DiaryTag> = {
 }
 
 type CatalogTagRecord = Record<string, { color: string; pinned?: boolean }>
+type CatalogReferenceTagRecord = Record<string, { color: string; pinned?: boolean; entries: string[] }>
 
 export abstract class DiaryTag {
-  abstract readonly kind: 'activity' | 'person' | 'location'
+  abstract readonly kind: 'activity' | 'person' | 'location' | 'pointOfInterest'
 
   readonly key: string
   readonly name: string
@@ -54,6 +55,14 @@ export class LocationTag extends DiaryTag {
   }
 }
 
+export class PointOfInterestTag extends DiaryTag {
+  readonly kind = 'pointOfInterest'
+
+  constructor(name: string, color: string, count = 0, pinned = false) {
+    super(name, name, color, count, pinned)
+  }
+}
+
 export abstract class DiaryTagManager<TTag extends DiaryTag> {
   abstract readonly itemLabel: string
   abstract readonly itemLabelPlural: string
@@ -78,7 +87,7 @@ export abstract class DiaryTagManager<TTag extends DiaryTag> {
   }
 }
 
-export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTag> extends DiaryTagManager<TTag> {
+export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTag | PointOfInterestTag> extends DiaryTagManager<TTag> {
   abstract readonly maxTags: number
   abstract readonly panelClassName: string
 
@@ -122,6 +131,41 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
           current?.pinned === true,
         ))
       }
+    }
+
+    return Array.from(tags.values()).sort(compareTags)
+  }
+
+  collectFromCatalog(catalogTags: CatalogReferenceTagRecord, settings: AppSettings): TTag[] {
+    const tags = new Map<string, TTag>()
+
+    for (const [name, tag] of Object.entries(catalogTags)) {
+      const normalizedName = this.normalizeName(name)
+
+      if (!normalizedName)
+        continue
+
+      tags.set(normalizedName, this.createTag(
+        normalizedName,
+        tag.color || DEFAULT_TAG_COLOR,
+        tag.entries.length,
+        tag.pinned === true,
+      ))
+    }
+
+    for (const [name, tag] of Object.entries(this.getCatalog(settings))) {
+      const normalizedName = this.normalizeName(name)
+
+      if (!normalizedName)
+        continue
+
+      const current = tags.get(normalizedName)
+      tags.set(normalizedName, this.createTag(
+        normalizedName,
+        tag.color || current?.color || DEFAULT_TAG_COLOR,
+        current?.count ?? 0,
+        tag.pinned === true || current?.pinned === true,
+      ))
     }
 
     return Array.from(tags.values()).sort(compareTags)
@@ -351,6 +395,69 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
   }
 }
 
+export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInterestTag> {
+  readonly itemLabel = 'Point of Interest'
+  readonly itemLabelPlural = 'Points of Interest'
+  readonly maxTags = MAX_POINTS_OF_INTEREST_PER_ENTRY
+  readonly panelClassName = 'poi-panel'
+
+  normalizeName(value: string): string {
+    return normalizePointOfInterestTag(value)
+  }
+
+  createTag(name: string, color: string, count = 0, pinned = false): PointOfInterestTag {
+    return new PointOfInterestTag(name, color, count, pinned)
+  }
+
+  getEntryNames(entry: DiaryEntry): string[] {
+    return entry.pointsOfInterest ?? []
+  }
+
+  getEntryColors(entry: DiaryEntry): Record<string, string> {
+    return entry.pointOfInterestColors ?? {}
+  }
+
+  getCatalog(settings: AppSettings): CatalogTagRecord {
+    return settings.pointOfInterestTags
+  }
+
+  getColorNames(settings: AppSettings): Record<string, string> {
+    return settings.pointOfInterestColorGroupNames
+  }
+
+  getColorGroupName(settings: AppSettings, color: string): string {
+    return settings.pointOfInterestColorGroupNames[color] || color
+  }
+
+  setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings {
+    return {
+      ...settings,
+      pointOfInterestTags: catalog,
+    }
+  }
+
+  setColorGroupName(settings: AppSettings, color: string, name: string): AppSettings {
+    return {
+      ...settings,
+      pointOfInterestColorGroupNames: {
+        ...settings.pointOfInterestColorGroupNames,
+        [color]: name,
+      },
+    }
+  }
+
+  updateEntryTag(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
+    return updateEntryPointOfInterest(entry, oldTag, nextTag, color)
+  }
+
+  buildDraftPatch(tags: string[], colors: Record<string, string>): Partial<DiaryEntry> {
+    return {
+      pointsOfInterest: normalizePointOfInterestTags(tags),
+      pointOfInterestColors: colors,
+    }
+  }
+}
+
 export class LocationTagManager extends DiaryTagManager<LocationTag> {
   readonly itemLabel = 'Location'
   readonly itemLabelPlural = 'Locations'
@@ -416,6 +523,7 @@ export class LocationTagManager extends DiaryTagManager<LocationTag> {
 
 export const activityTagManager = new ActivityTagManager()
 export const personTagManager = new PersonTagManager()
+export const pointOfInterestTagManager = new PointOfInterestTagManager()
 export const locationTagManager = new LocationTagManager()
 
 export function getLocationTagKey(city: City): string {

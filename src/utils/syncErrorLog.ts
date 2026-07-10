@@ -111,17 +111,34 @@ function formatNasErrorLog(
   if (error instanceof Error && error.stack)
     lines.push(`Stack:\n${error.stack}`)
 
-  if (isSynologySyncError(error) && error.code === 119) {
-    lines.push(
-      'Hint: DSM error 119 means invalid session. The app will pass _sid and SynoToken through URL parameters for upload requests.',
-    )
-  } else {
-    lines.push(
-      'Hint: Browser "Failed to fetch" usually means the request was blocked before DSM returned JSON. Check CORS, TLS certificate trust, DNS, and whether DSM allows requests from http://127.0.0.1:5173.',
-    )
-  }
+  lines.push(getNasErrorHint(error))
 
   return lines.join('\n')
+}
+
+function getNasErrorHint(error: unknown): string {
+  if (isSynologySyncError(error) && error.code === 119)
+    return 'Hint: DSM error 119 means invalid session. The app will pass _sid and SynoToken through URL parameters for upload requests.'
+
+  if (isSynologySyncError(error) && isGatewayErrorCode(error.code)) {
+    if (isLocalNasProxyEndpoint(error.endpoint))
+      return 'Hint: HTTP 502/503/504 from /nas-public-api or /nas-lan-api usually means the local dev proxy could not reach DSM or received an invalid gateway response. Check the proxy targets in vite.config.ts or set LFX_DIARY_NAS_PUBLIC_URL / LFX_DIARY_NAS_LAN_URL before starting npm run browser:dev.'
+
+    return 'Hint: HTTP 502/503/504 usually means the NAS gateway, reverse proxy, QuickConnect/DDNS route, or DSM itself returned an upstream error before the FileStation API responded.'
+  }
+
+  if (isSynologySyncError(error) && error.message.includes('non-JSON response'))
+    return 'Hint: DSM APIs should return JSON for login/list/upload errors. A non-JSON response is often an HTML error page from a proxy, captive login page, or gateway. Check the Endpoint and Original error response preview above.'
+
+  return 'Hint: Browser "Failed to fetch" usually means the request was blocked before DSM returned JSON. Check CORS, TLS certificate trust, DNS, and whether DSM allows requests from http://127.0.0.1:5173.'
+}
+
+function isGatewayErrorCode(code: number | undefined): boolean {
+  return code === 502 || code === 503 || code === 504
+}
+
+function isLocalNasProxyEndpoint(endpoint: string | undefined): boolean {
+  return Boolean(endpoint?.includes('/nas-public-api/') || endpoint?.includes('/nas-lan-api/'))
 }
 
 function isGitSyncError(error: unknown): error is GitSyncErrorLike {

@@ -1,4 +1,4 @@
-import type { ActivityTag, CatalogDiaryTagManager, PersonTag } from '../domain/tagModels'
+import type { ActivityTag, CatalogDiaryTagManager, PersonTag, PointOfInterestTag } from '../domain/tagModels'
 import { updateDiaryCatalogLocationCity, updateDiaryCatalogLocationPin } from '../domain/diaryCatalog'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry } from '../domain/types'
 import {
@@ -8,7 +8,7 @@ import {
   updateEntryLocations,
 } from '../utils/diaryEntryHelpers'
 
-export type CatalogTagManager = CatalogDiaryTagManager<ActivityTag | PersonTag>
+export type CatalogTagManager = CatalogDiaryTagManager<ActivityTag | PersonTag | PointOfInterestTag>
 
 export type TagEventState = {
   settings: AppSettings
@@ -50,6 +50,11 @@ export type TagEvent =
   }
   | {
     type: 'entry-tags-deleted'
+    manager: CatalogTagManager
+    tags: string[]
+  }
+  | {
+    type: 'entry-tags-reordered'
     manager: CatalogTagManager
     tags: string[]
   }
@@ -183,6 +188,18 @@ function currentEntryTagObserver(event: TagEvent, state: TagEventState): TagEven
     return {
       ...state,
       draft: nextDraft,
+    }
+  }
+
+  if (event.type === 'entry-tags-reordered') {
+    const patch = event.manager.buildDraftPatch(event.tags, event.manager.getEntryColors(state.draft))
+
+    return {
+      ...state,
+      draft: markEntryEdited({
+        ...state.draft,
+        ...patch,
+      }),
     }
   }
 

@@ -22,6 +22,7 @@ import {
   getCatalogPersonColorMap,
   normalizePeopleMetadata,
 } from './metadata/peopleMetadata'
+import { normalizePointOfInterestTags } from './tags'
 import {
   deserializeWeatherMetadata,
   normalizeWeatherMetadata,
@@ -112,6 +113,7 @@ function deserializeLegacyDiaryEntry(markdown: string, fileName: string, catalog
       mood: deserializeMoodMetadata(headerLines.find((line) => line.startsWith('Mood:'))),
       tags: catalogMetadata.tags ?? deserializeActivitiesMetadata(headerLines.find((line) => line.startsWith('Tags:'))),
       people: catalogMetadata.people ?? deserializePeopleMetadata(headerLines.find((line) => line.startsWith('People:'))),
+      pointsOfInterest: catalogMetadata.pointsOfInterest,
       content,
     },
     diaryDate,
@@ -124,6 +126,7 @@ function normalizeDeserializedEntry(entry: Partial<DiaryEntry>, diaryDate: strin
   const cities = normalizeDeserializedCities(entry.cities)
   const tags = normalizeActivitiesMetadata(entry.tags)
   const people = normalizePeopleMetadata(entry.people)
+  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
   const weather = normalizeWeatherMetadata(
     entry.dailyWeatherCode,
     entry.dailyWeatherText,
@@ -147,6 +150,13 @@ function normalizeDeserializedEntry(entry: Partial<DiaryEntry>, diaryDate: strin
     tagColors: normalizeDeserializedColors(entry.tagColors, tags, DEFAULT_TAG_COLOR, getCatalogActivityColorMap(catalog)),
     people,
     personColors: normalizeDeserializedColors(entry.personColors, people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
+    pointsOfInterest,
+    pointOfInterestColors: normalizeDeserializedColors(
+      entry.pointOfInterestColors,
+      pointsOfInterest,
+      DEFAULT_TAG_COLOR,
+      getCatalogPointOfInterestColorMap(catalog),
+    ),
     content: entry.content ?? '',
     createdAt: entry.createdAt || now,
     updatedAt: entry.updatedAt || now,
@@ -187,6 +197,7 @@ function applyCatalogToEntry(entry: DiaryEntry, catalog: DiaryCatalog | undefine
     : entry.cities.map((city) => findCatalogCity(city.name, catalog) ?? city)
   const tags = catalogMetadata.tags ?? entry.tags
   const people = catalogMetadata.people ?? entry.people
+  const pointsOfInterest = catalogMetadata.pointsOfInterest ?? entry.pointsOfInterest
   const locationColors = {
     ...entry.locationColors,
     ...normalizeDeserializedColors(
@@ -204,15 +215,21 @@ function applyCatalogToEntry(entry: DiaryEntry, catalog: DiaryCatalog | undefine
     ...entry.personColors,
     ...normalizeDeserializedColors({}, people, DEFAULT_TAG_COLOR, getCatalogPersonColorMap(catalog)),
   }
+  const pointOfInterestColors = {
+    ...entry.pointOfInterestColors,
+    ...normalizeDeserializedColors({}, pointsOfInterest, DEFAULT_TAG_COLOR, getCatalogPointOfInterestColorMap(catalog)),
+  }
 
   return {
     ...entry,
     cities,
     tags,
     people,
+    pointsOfInterest,
     locationColors,
     tagColors,
     personColors,
+    pointOfInterestColors,
   }
 }
 
@@ -233,14 +250,16 @@ function getCatalogEntryMetadata(catalog: DiaryCatalog | undefined, entryReferen
   cities: City[]
   tags: string[] | undefined
   people: string[] | undefined
+  pointsOfInterest: string[] | undefined
 } {
   if (!catalog || !entryReferences.length)
-    return { cities: [], tags: undefined, people: undefined }
+    return { cities: [], tags: undefined, people: undefined, pointsOfInterest: undefined }
 
   const entryReferenceSet = new Set(entryReferences)
   const hasCatalogReference = Object.values(catalog.locations).some((location) => hasAnyEntryReference(location.entries, entryReferenceSet))
     || Object.values(catalog.activities).some((activity) => hasAnyEntryReference(activity.entries, entryReferenceSet))
     || Object.values(catalog.people).some((person) => hasAnyEntryReference(person.entries, entryReferenceSet))
+    || Object.values(catalog.pointsOfInterest).some((pointOfInterest) => hasAnyEntryReference(pointOfInterest.entries, entryReferenceSet))
   const cities = Object.values(catalog.locations)
     .filter((location) => hasAnyEntryReference(location.entries, entryReferenceSet))
     .map((location) => location.city)
@@ -252,14 +271,28 @@ function getCatalogEntryMetadata(catalog: DiaryCatalog | undefined, entryReferen
     .filter(([, person]) => hasAnyEntryReference(person.entries, entryReferenceSet))
     .map(([name]) => name)
     .sort((a, b) => a.localeCompare(b))
+  const pointsOfInterest = Object.entries(catalog.pointsOfInterest)
+    .filter(([, pointOfInterest]) => hasAnyEntryReference(pointOfInterest.entries, entryReferenceSet))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b))
 
   return {
     cities,
     tags: hasCatalogReference ? tags : undefined,
     people: hasCatalogReference ? people : undefined,
+    pointsOfInterest: hasCatalogReference ? pointsOfInterest : undefined,
   }
 }
 
 function hasAnyEntryReference(entries: string[], entryReferences: Set<string>): boolean {
   return entries.some((entry) => entryReferences.has(entry))
+}
+
+function getCatalogPointOfInterestColorMap(catalog: DiaryCatalog | undefined): Record<string, string> {
+  if (!catalog)
+    return {}
+
+  return Object.fromEntries(
+    Object.entries(catalog.pointsOfInterest).map(([name, pointOfInterest]) => [name, pointOfInterest.color]),
+  )
 }

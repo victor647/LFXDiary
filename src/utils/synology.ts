@@ -21,7 +21,7 @@ import { getActiveNasUrl } from './settings'
 type SynologyResponse<T = unknown> = {
   success: boolean
   data?: T
-  error?: { code: number }
+  error?: { code: number; message?: string }
 }
 
 type SynologyLoginData = {
@@ -425,7 +425,7 @@ function getSynologyPullFallbackError(
       fallbackError.endpoint,
       fallbackError.code,
       fallbackError.originalMessage
-        ? `${originalMessage}. Fallback ${fallbackMode} original error: ${fallbackError.originalMessage}`
+        ? `${originalMessage}. Fallback ${fallbackMode} error: ${fallbackMessage}. Fallback ${fallbackMode} original error: ${fallbackError.originalMessage}`
         : originalMessage,
     )
   }
@@ -470,7 +470,7 @@ async function loginToSynology(
 
   if (!payload.success || !payload.data?.sid)
     throw new SynologySyncError(
-      getSynologyErrorMessage(payload.error?.code, 'NAS login failed.'),
+      getSynologyErrorMessage(payload.error?.code, 'NAS login failed.', payload.error?.message),
       'login',
       url.toString(),
       payload.error?.code,
@@ -522,7 +522,7 @@ async function uploadTextFile(
 
   if (!payload.success)
     throw new SynologySyncError(
-      getSynologyErrorMessage(payload.error?.code, 'Markdown upload failed.'),
+      getSynologyErrorMessage(payload.error?.code, 'Markdown upload failed.', payload.error?.message),
       'upload',
       url.toString(),
       payload.error?.code,
@@ -593,7 +593,7 @@ async function listFolder(
 
   if (!payload.success)
     throw new SynologySyncError(
-      getSynologyErrorMessage(payload.error?.code, 'Markdown list failed.'),
+      getSynologyErrorMessage(payload.error?.code, 'Markdown list failed.', payload.error?.message),
       'list',
       url.toString(),
       payload.error?.code,
@@ -629,7 +629,7 @@ async function deleteFileFromSynology(baseUrl: string, session: SynologySession,
 
   if (!payload.success)
     throw new SynologySyncError(
-      getSynologyErrorMessage(payload.error?.code, 'Markdown delete failed.'),
+      getSynologyErrorMessage(payload.error?.code, 'Markdown delete failed.', payload.error?.message),
       'delete',
       url.toString(),
       payload.error?.code,
@@ -662,7 +662,7 @@ async function downloadTextFile(
 
     if (payload && payload.success === false)
       throw new SynologySyncError(
-        getSynologyErrorMessage(payload.error?.code, 'Markdown download failed.'),
+        getSynologyErrorMessage(payload.error?.code, 'Markdown download failed.', payload.error?.message),
         'download',
         url.toString(),
         payload.error?.code,
@@ -736,17 +736,40 @@ async function fetchSynology(
 }
 
 async function parseSynologyResponse<T>(response: Response, phase: string, endpoint: string): Promise<SynologyResponse<T>> {
+  const text = await response.text()
+
+  if (!text.trim())
+    throw new SynologySyncError(
+      `NAS returned an empty response during ${phase}. HTTP ${response.status}.`,
+      phase,
+      endpoint,
+      response.status,
+      getNonJsonResponseSummary(response, text),
+    )
+
   try {
-    return (await response.json()) as SynologyResponse<T>
+    return JSON.parse(text) as SynologyResponse<T>
   } catch (error) {
     throw new SynologySyncError(
       `NAS returned a non-JSON response during ${phase}. HTTP ${response.status}.`,
       phase,
       endpoint,
       response.status,
-      error instanceof Error ? error.message : String(error),
+      `${error instanceof Error ? error.message : String(error)}. ${getNonJsonResponseSummary(response, text)}`,
     )
   }
+}
+
+function getNonJsonResponseSummary(response: Response, text: string): string {
+  const contentType = response.headers.get('content-type') || 'not provided'
+  const preview = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240)
+
+  return preview
+    ? `Content-Type: ${contentType}. Response starts with: ${preview}`
+    : `Content-Type: ${contentType}. Response body was empty.`
 }
 
 function getFetchFailureMessage(error: unknown, requestTimeoutMs: number): string {
@@ -762,7 +785,9 @@ function getFetchFailureMessage(error: unknown, requestTimeoutMs: number): strin
   return error instanceof Error ? error.message : 'Network request failed.'
 }
 
-function getSynologyErrorMessage(code: number | undefined, fallback: string): string {
+function getSynologyErrorMessage(code: number | undefined, fallback: string, detail?: string): string {
+  const detailText = detail ? ` ${detail}` : ''
+
   switch (code) {
     case 400:
       return 'No such NAS account or incorrect password.'
@@ -775,6 +800,6 @@ function getSynologyErrorMessage(code: number | undefined, fallback: string): st
     case 404:
       return 'Two-step verification failed.'
     default:
-      return code ? `${fallback} Synology error code: ${code}.` : fallback
+      return code ? `${fallback} Synology error code: ${code}.${detailText}` : `${fallback}${detailText}`
   }
 }

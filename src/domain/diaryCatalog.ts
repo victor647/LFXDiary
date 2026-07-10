@@ -1,5 +1,5 @@
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, weatherCodeText } from './constants'
-import { normalizePersonTag, sanitizeTag } from './tags'
+import { normalizePersonTag, normalizePointOfInterestTag, sanitizeTag } from './tags'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry } from './types'
 import { getCityCatalogKey, isCity } from './metadata/locationMetadata'
 
@@ -13,6 +13,7 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   const locations = new Map<string, CatalogLocationMapValue>()
   const activities = new Map<string, CatalogNamedTagMapValue>()
   const people = new Map<string, CatalogNamedTagMapValue>()
+  const pointsOfInterest = new Map<string, CatalogNamedTagMapValue>()
 
   locations.set(getCityCatalogKey(DEFAULT_CITY), {
     city: DEFAULT_CITY,
@@ -21,7 +22,7 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   })
 
   for (const entry of entries)
-    addEntryToCatalogMaps(locations, activities, people, entry)
+    addEntryToCatalogMaps(locations, activities, people, pointsOfInterest, entry)
 
   return {
     version: 1,
@@ -54,6 +55,15 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
           entries: sortReferences(person.entries),
         }]),
     ),
+    pointsOfInterest: Object.fromEntries(
+      Array.from(pointsOfInterest.values())
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((pointOfInterest) => [pointOfInterest.name, {
+          color: pointOfInterest.color,
+          pinned: pointOfInterest.pinned === true,
+          entries: sortReferences(pointOfInterest.entries),
+        }]),
+    ),
   }
 }
 
@@ -68,6 +78,7 @@ export function removeDiaryCatalogEntry(catalog: DiaryCatalog, diaryDate: string
     locations: removeEntryReferences(catalog.locations, diaryDate, (key) => key === getCityCatalogKey(DEFAULT_CITY)),
     activities: removeEntryReferences(catalog.activities, diaryDate),
     people: removeEntryReferences(catalog.people, diaryDate),
+    pointsOfInterest: removeEntryReferences(catalog.pointsOfInterest, diaryDate),
   }
 }
 
@@ -132,6 +143,7 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
   const locations = new Map<string, CatalogLocationMapValue>()
   const activities = new Map<string, CatalogNamedTagMapValue>()
   const people = new Map<string, CatalogNamedTagMapValue>()
+  const pointsOfInterest = new Map<string, CatalogNamedTagMapValue>()
 
   for (const [key, location] of Object.entries(catalog.locations)) {
     locations.set(key, {
@@ -160,7 +172,16 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
     })
   }
 
-  addEntryToCatalogMaps(locations, activities, people, entry)
+  for (const [name, pointOfInterest] of Object.entries(catalog.pointsOfInterest)) {
+    pointsOfInterest.set(name, {
+      name,
+      color: pointOfInterest.color,
+      pinned: pointOfInterest.pinned === true,
+      entries: new Set(pointOfInterest.entries),
+    })
+  }
+
+  addEntryToCatalogMaps(locations, activities, people, pointsOfInterest, entry)
 
   return {
     version: 1,
@@ -193,6 +214,15 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
           entries: sortReferences(person.entries),
         }]),
     ),
+    pointsOfInterest: Object.fromEntries(
+      Array.from(pointsOfInterest.values())
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((pointOfInterest) => [pointOfInterest.name, {
+          color: pointOfInterest.color,
+          pinned: pointOfInterest.pinned === true,
+          entries: sortReferences(pointOfInterest.entries),
+        }]),
+    ),
   }
 }
 
@@ -202,6 +232,7 @@ export function applySettingsToDiaryCatalog(catalog: DiaryCatalog, settings: App
     updatedAt: new Date().toISOString(),
     activities: applyNamedTagSettings(catalog.activities, settings.activityTags),
     people: applyNamedTagSettings(catalog.people, settings.peopleTags),
+    pointsOfInterest: applyNamedTagSettings(catalog.pointsOfInterest, settings.pointOfInterestTags),
   }
 }
 
@@ -210,6 +241,7 @@ export function applyDiaryCatalogToSettings(settings: AppSettings, catalog: Diar
     ...settings,
     activityTags: getNamedTagSettings(catalog.activities),
     peopleTags: getNamedTagSettings(catalog.people),
+    pointOfInterestTags: getNamedTagSettings(catalog.pointsOfInterest),
   }
 }
 
@@ -235,6 +267,7 @@ export function deserializeDiaryCatalog(raw: string): DiaryCatalog | null {
       locations: normalizeCatalogLocations(catalog.locations),
       activities: normalizeCatalogActivities(catalog.activities),
       people: normalizeCatalogActivities(catalog.people),
+      pointsOfInterest: normalizeCatalogActivities(catalog.pointsOfInterest),
     }
   } catch {
     return null
@@ -378,6 +411,7 @@ function addEntryToCatalogMaps(
   locations: Map<string, CatalogLocationMapValue>,
   activities: Map<string, CatalogNamedTagMapValue>,
   people: Map<string, CatalogNamedTagMapValue>,
+  pointsOfInterest: Map<string, CatalogNamedTagMapValue>,
   entry: DiaryEntry,
 ) {
   const entryReference = getEntryCatalogReference(entry)
@@ -418,6 +452,21 @@ function addEntryToCatalogMaps(
     people.set(normalizedPerson, {
       name: normalizedPerson,
       color: entry.personColors?.[normalizedPerson] ?? current?.color ?? DEFAULT_TAG_COLOR,
+      pinned: current?.pinned === true,
+      entries: addReference(current?.entries, entryReference),
+    })
+  }
+
+  for (const pointOfInterest of entry.pointsOfInterest ?? []) {
+    const normalizedPointOfInterest = normalizePointOfInterestTag(pointOfInterest)
+
+    if (!normalizedPointOfInterest)
+      continue
+
+    const current = pointsOfInterest.get(normalizedPointOfInterest)
+    pointsOfInterest.set(normalizedPointOfInterest, {
+      name: normalizedPointOfInterest,
+      color: entry.pointOfInterestColors?.[normalizedPointOfInterest] ?? current?.color ?? DEFAULT_TAG_COLOR,
       pinned: current?.pinned === true,
       entries: addReference(current?.entries, entryReference),
     })

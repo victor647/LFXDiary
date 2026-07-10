@@ -44,6 +44,8 @@ export type DiaryEntry = {
   tagColors: Record<string, string>
   people: string[]
   personColors: Record<string, string>
+  pointsOfInterest: string[]
+  pointOfInterestColors: Record<string, string>
   content: string
   createdAt: string
   updatedAt: string
@@ -123,6 +125,11 @@ export type AppSettings = {
     color: string
     pinned?: boolean
   }>
+  pointOfInterestColorGroupNames: Record<string, string>
+  pointOfInterestTags: Record<string, {
+    color: string
+    pinned?: boolean
+  }>
   locationColorGroupNames: Record<string, string>
   temperatureThresholds: TemperatureThresholds
 }
@@ -146,14 +153,25 @@ export type DiaryCatalog = {
     pinned?: boolean
     entries: string[]
   }>
+  pointsOfInterest: Record<string, {
+    color: string
+    pinned?: boolean
+    entries: string[]
+  }>
 }
 
-export type TagFilterKind = 'location' | 'activity' | 'person'
+export type TagFilterKind = 'location' | 'activity' | 'person' | 'pointOfInterest'
+
+export type TagFilterSelection = {
+  kind: TagFilterKind
+  tag: string
+}
 
 export type TagFilter = {
   kind: TagFilterKind | ''
   color: string
   tag: string
+  tags: TagFilterSelection[]
 }
 
 export type TagFilterOption = {
