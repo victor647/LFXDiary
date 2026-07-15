@@ -492,6 +492,7 @@ export function Sidebar({
           className="context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={onCloseContextMenu}
+          onContextMenu={(e) => e.preventDefault()}
         >
           <button type="button" onClick={() => onPullEntry(contextMenu.entry)}>
             <Download size={14} />
@@ -525,7 +526,12 @@ export function Sidebar({
           <Download size={18} />
           Pull
         </button>
-        <button type="button" onClick={onSync} title="Push unsynced entries in the selected year or month to the sync provider">
+        <button
+          type="button"
+          onClick={onSync}
+          onContextMenu={(e) => e.preventDefault()}
+          title="Push unsynced entries in the selected year or month to the sync provider"
+        >
           <Upload size={18} />
           Push
         </button>

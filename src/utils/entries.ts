@@ -9,10 +9,13 @@ import {
   emptyMood,
 } from '../domain/constants'
 import { buildDiaryCatalog, deserializeDiaryCatalog } from '../domain/diaryCatalog'
-import type { City, DiaryCatalog, DiaryEntry, NotebookGroup, RecentCity, RecentTag, WeatherSample } from '../domain/types'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, NotebookGroup, PullConflict, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
 import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTagColors, normalizeTags, sanitizeTag } from './tags'
+import { getSettingsPersonColor, getSettingsPointOfInterestColor } from './settings'
+import { areRecordsEqual, areStringArraysEqual, getNormalizedDailyWeatherFields } from './diaryEntryHelpers'
+import { normalizeBodyText } from './syncErrorLog'
 
 export type DiaryMonthIndexItem = {
   key: string
@@ -470,12 +473,12 @@ export function upsertEntry(entries: DiaryEntry[], entry: DiaryEntry): DiaryEntr
 }
 
 export function mergePulledEntries(entries: DiaryEntry[], pulledEntries: DiaryEntry[]): DiaryEntry[] {
-  const pulledByDate = new Map(pulledEntries.map((entry) => [entry.diaryDate, normalizeEntry(entry)]))
-  const mergedEntries = entries
-    .filter((entry) => !pulledByDate.has(entry.diaryDate))
+  const localByDate = new Map(entries.map((entry) => [entry.diaryDate, normalizeEntry(entry)]))
+  const newPulledEntries = pulledEntries
+    .filter((entry) => !localByDate.has(entry.diaryDate))
     .map(normalizeEntry)
 
-  return [...pulledByDate.values(), ...mergedEntries]
+  return [...entries.map(normalizeEntry), ...newPulledEntries]
 }
 
 export function groupEntriesByNotebook(entries: DiaryEntry[]): NotebookGroup[] {
@@ -510,6 +513,90 @@ export function groupEntriesByNotebook(entries: DiaryEntry[]): NotebookGroup[] {
           isLoaded: true,
         })),
     }))
+}
+
+export function syncEntryRichTextTagColors(entry: DiaryEntry, settings: AppSettings): DiaryEntry {
+  const people = normalizePersonTags(entry.people ?? [])
+  const personColors: Record<string, string> = {}
+  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
+  const pointOfInterestColors: Record<string, string> = {}
+
+  for (const person of people) {
+    const color = getSettingsPersonColor(settings, person) ?? entry.personColors?.[person]
+
+    if (color)
+      personColors[person] = color
+  }
+
+  for (const pointOfInterest of pointsOfInterest) {
+    const color = getSettingsPointOfInterestColor(settings, pointOfInterest) ?? entry.pointOfInterestColors?.[pointOfInterest]
+
+    if (color)
+      pointOfInterestColors[pointOfInterest] = color
+  }
+
+  if (
+    areStringArraysEqual(entry.people ?? [], people)
+    && areStringArraysEqual(entry.pointsOfInterest ?? [], pointsOfInterest)
+    && areRecordsEqual(entry.personColors ?? {}, personColors)
+    && areRecordsEqual(entry.pointOfInterestColors ?? {}, pointOfInterestColors)
+  )
+    return entry
+
+  return {
+    ...entry,
+    people,
+    personColors,
+    pointsOfInterest,
+    pointOfInterestColors,
+  }
+}
+
+export function getPeopleMentionOptions(settings: AppSettings, catalog: DiaryCatalog, draft: DiaryEntry): Array<{ name: string; color: string }> {
+  const people = new Map<string, string>()
+
+  for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
+    const person = normalizePersonTag(rawName)
+
+    if (person)
+      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  }
+
+  for (const [rawName, tag] of Object.entries(catalog.people)) {
+    const person = normalizePersonTag(rawName)
+
+    if (person && !people.has(person))
+      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  }
+
+  for (const rawPerson of draft.people ?? []) {
+    const person = normalizePersonTag(rawPerson)
+
+    if (person)
+      people.set(person, draft.personColors?.[rawPerson] ?? people.get(person) ?? DEFAULT_TAG_COLOR)
+  }
+
+  return Array.from(people.entries())
+    .map(([name, color]) => ({ name, color }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export function getPullConflicts(localEntries: DiaryEntry[], cloudEntries: DiaryEntry[]): PullConflict[] {
+  const localEntriesByDate = new Map(localEntries.map((entry) => [entry.diaryDate, entry]))
+
+  return cloudEntries
+    .map((cloudEntry) => {
+      const localEntry = localEntriesByDate.get(cloudEntry.diaryDate)
+
+      if (!localEntry || normalizeBodyText(localEntry.content) === normalizeBodyText(cloudEntry.content))
+        return null
+
+      return {
+        localEntry,
+        cloudEntry,
+      }
+    })
+    .filter((conflict): conflict is PullConflict => Boolean(conflict))
 }
 
 export function getRecentCities(entries: DiaryEntry[]): RecentCity[] {
@@ -607,4 +694,31 @@ export function normalizeLocationColors(locationColors: Record<string, string>, 
   }
 
   return normalizedColors
+}
+
+export function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
+  const normalizedTags = normalizeTags(entry.tags)
+  const normalizedPeople = normalizePersonTags(entry.people ?? [])
+  const normalizedPointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
+  const normalizedCities = normalizeLocationColors(entry.locationColors, entry.cities)
+
+  return {
+    ...entry,
+    tags: normalizedTags,
+    people: normalizedPeople,
+    pointsOfInterest: normalizedPointsOfInterest,
+    ...getNormalizedDailyWeatherFields(entry),
+    tagColors: normalizeTagColors(entry.tagColors, normalizedTags),
+    personColors: normalizeTagColors(entry.personColors ?? {}, normalizedPeople, normalizePersonTag),
+    pointOfInterestColors: normalizeTagColors(
+      entry.pointOfInterestColors ?? {},
+      normalizedPointsOfInterest,
+      normalizePointOfInterestTag,
+    ),
+    locationColors: normalizedCities,
+    updatedAt: savedAt,
+    savedAt,
+    syncedAt: null,
+    isEdited: true,
+  }
 }

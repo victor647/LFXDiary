@@ -11,6 +11,8 @@
     "browser:stop": "node packaging/scripts/stop-browser-dev.cjs",
     "build": "tsc -b && vite build",
     "nas:build": "npm run build && node packaging/scripts/prepare-nas-dist.cjs",
+    "android:sync": "npm run build && node packaging/scripts/prepare-android-dist.cjs && npx cap sync android",
+    "android:open": "npx cap open android",
     "desktop:dev": "concurrently -k \"npm:dev\" \"npm:electron:dev\"",
     "electron:dev": "wait-on http://localhost:5173 && electron .",
     "desktop:pack": "npm run desktop:pack:win",
@@ -64,6 +66,9 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.2.1",
+    "@capacitor/cli": "^7.2.1",
+    "@capacitor/core": "^7.2.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

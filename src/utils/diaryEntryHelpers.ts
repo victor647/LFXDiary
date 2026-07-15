@@ -222,3 +222,54 @@ export function hasCloudCopy(entry: DiaryEntry): boolean {
 export function upsertEntries(entries: DiaryEntry[], updatedEntries: DiaryEntry[]): DiaryEntry[] {
   return updatedEntries.reduce((current, entry) => upsertEntry(current, entry), entries)
 }
+
+export function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length)
+    return false
+
+  return left.every((value, index) => value === right[index])
+}
+
+export function areRecordsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftEntries = Object.entries(left)
+  const rightEntries = Object.entries(right)
+
+  if (leftEntries.length !== rightEntries.length)
+    return false
+
+  return leftEntries.every(([key, value]) => right[key] === value)
+}
+
+export function getEditedEntryCount(entries: DiaryEntry[], draft: DiaryEntry): number {
+  const editedEntryIds = new Set(entries.filter(isEntryUnsynced).map((entry) => entry.id))
+
+  if (draft.isEdited || !entries.some((entry) => entry.id === draft.id && entry.updatedAt === draft.updatedAt))
+    editedEntryIds.add(draft.id)
+
+  return editedEntryIds.size
+}
+
+export function getUnsavedEntryIds(entries: DiaryEntry[], draft: DiaryEntry): Set<string> {
+  return new Set(getEntriesWithDraft(entries, draft).filter(isEntryUnsaved).map((entry) => entry.id))
+}
+
+export function getUnuploadedEntryCount(entries: DiaryEntry[], draft: DiaryEntry): number {
+  return getEntriesWithDraft(entries, draft).filter(isEntryUnsynced).length
+}
+
+export function getEntriesWithDraft(entries: DiaryEntry[], draft: DiaryEntry): DiaryEntry[] {
+  const entriesById = new Map(entries.map((entry) => [entry.id, entry]))
+  entriesById.set(draft.id, draft)
+  return Array.from(entriesById.values())
+}
+
+export function isEntryUnsaved(entry: DiaryEntry): boolean {
+  return !entry.savedAt || entry.savedAt < entry.updatedAt
+}
+
+export function getSidebarStatusMessage(unsavedCount: number, unuploadedCount: number): string | null {
+  if (!unsavedCount && !unuploadedCount)
+    return null
+
+  return `Unsaved ${unsavedCount} · Unuploaded ${unuploadedCount}`
+}

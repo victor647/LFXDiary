@@ -12,6 +12,7 @@ import {
   TEMPERATURE_COLOR_BAND_DEFINITIONS,
 } from '../domain/constants'
 import type { AppSettings, TemperatureColorBand, TemperatureThresholds } from '../domain/types'
+import { normalizePersonTag, normalizePointOfInterestTag } from './tags'
 
 export const defaultSettings: AppSettings = {
   syncProvider: 'nas',
@@ -269,4 +270,26 @@ function formatTemperatureBandLabel(minC: number | null, maxC: number | null): s
     return `${minC}-${maxC}°C`
 
   return 'Temperature'
+}
+
+export function getSettingsPersonColor(settings: AppSettings, person: string): string | null {
+  const normalizedPerson = normalizePersonTag(person)
+
+  for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
+    if (normalizePersonTag(rawName) === normalizedPerson)
+      return tag.color
+  }
+
+  return null
+}
+
+export function getSettingsPointOfInterestColor(settings: AppSettings, pointOfInterest: string): string | null {
+  const normalizedPointOfInterest = normalizePointOfInterestTag(pointOfInterest)
+
+  for (const [rawName, tag] of Object.entries(settings.pointOfInterestTags)) {
+    if (normalizePointOfInterestTag(rawName) === normalizedPointOfInterest)
+      return tag.color
+  }
+
+  return null
 }

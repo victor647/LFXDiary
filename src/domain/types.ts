@@ -197,3 +197,31 @@ export type TagFilterOption = {
   color: string
   colorLabel: string
 }
+
+export type PullConflict = {
+  localEntry: DiaryEntry
+  cloudEntry: DiaryEntry
+}
+
+export type PendingPullReview = {
+  syncTarget: string
+  target: SyncTarget
+  targetLabel: string
+  baseEntries: DiaryEntry[]
+  resolvedEntries: DiaryEntry[]
+  conflicts: PullConflict[]
+  index: number
+}
+
+export type SyncProgress = {
+  target: string
+  message: string
+  title?: string
+  current?: number
+  total?: number
+}
+
+export type SyncTarget =
+  | { kind: 'entry'; key: string; notebookKey: string }
+  | { kind: 'month'; key: string }
+  | { kind: 'year'; year: string }

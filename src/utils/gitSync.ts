@@ -10,7 +10,11 @@ import {
 
   WEATHER_CODES_FILE_NAME,
 
+  applySettingsToDiaryCatalog,
+  buildDiaryCatalog,
+
   deserializeDiaryCatalog,
+  mergeDiaryCatalogs,
   serializeDiaryCatalog,
   serializeWeatherCodes,
 
@@ -76,13 +80,16 @@ export async function pushEntriesToGit(
   const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
-  const existingCatalog = await readOptionalRepoFile(fs, catalogPath)
-  if (existingCatalog) {
+  const existingCatalogRaw = await readOptionalRepoFile(fs, catalogPath)
+  if (existingCatalogRaw) {
     await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
-    await writeRepoFile(fs, backupPath, existingCatalog)
+    await writeRepoFile(fs, backupPath, existingCatalogRaw)
   }
 
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries, settings))
+  const localCatalog = applySettingsToDiaryCatalog(buildDiaryCatalog(catalogEntries), settings)
+  const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
+  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   filepaths.push(catalogPath, weatherCodesPath)
 
@@ -159,7 +166,11 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries, settings))
+  const existingCatalogRaw = await readOptionalRepoFile(fs, catalogPath)
+  const localCatalog = applySettingsToDiaryCatalog(buildDiaryCatalog(catalogEntries), settings)
+  const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
+  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
 
   await git.add({ fs, dir: repoDir, filepath: catalogPath })
@@ -219,13 +230,15 @@ export async function pushDiaryCatalogToGit(
   const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
-  const existingCatalog = await readOptionalRepoFile(fs, catalogPath)
-  if (existingCatalog) {
+  const existingCatalogRaw = await readOptionalRepoFile(fs, catalogPath)
+  if (existingCatalogRaw) {
     await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
-    await writeRepoFile(fs, backupPath, existingCatalog)
+    await writeRepoFile(fs, backupPath, existingCatalogRaw)
   }
 
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalog, settings))
+  const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
+  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog
+  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog, settings))
   onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)

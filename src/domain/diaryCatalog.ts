@@ -394,6 +394,88 @@ function mergeYearRefsIntoGlobalSection<T extends { entries: string[] }>(
   return next
 }
 
+export function mergeDiaryCatalogs(base: DiaryCatalog, incoming: DiaryCatalog): DiaryCatalog {
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    locations: mergeLocationSections(base.locations, incoming.locations),
+    activities: mergeNamedTagSections(base.activities, incoming.activities),
+    people: mergeNamedTagSections(base.people, incoming.people),
+    pointsOfInterest: mergeNamedTagSections(base.pointsOfInterest, incoming.pointsOfInterest),
+    colorNames: {
+      activities: { ...(incoming.colorNames?.activities ?? {}), ...(base.colorNames?.activities ?? {}) },
+      people: { ...(incoming.colorNames?.people ?? {}), ...(base.colorNames?.people ?? {}) },
+      pointsOfInterest: { ...(incoming.colorNames?.pointsOfInterest ?? {}), ...(base.colorNames?.pointsOfInterest ?? {}) },
+      locations: { ...(incoming.colorNames?.locations ?? {}), ...(base.colorNames?.locations ?? {}) },
+    },
+  }
+}
+
+function mergeLocationSections(
+  base: DiaryCatalog['locations'],
+  incoming: DiaryCatalog['locations'],
+): DiaryCatalog['locations'] {
+  const merged: DiaryCatalog['locations'] = {}
+  const allKeys = new Set([...Object.keys(base), ...Object.keys(incoming)])
+
+  for (const key of allKeys) {
+    const baseLocation = base[key]
+    const incomingLocation = incoming[key]
+
+    if (baseLocation && incomingLocation) {
+      merged[key] = {
+        city: baseLocation.city,
+        color: resolveTagColor(baseLocation.color, incomingLocation.color),
+        pinned: baseLocation.pinned === true || incomingLocation.pinned === true,
+        entries: mergeReferences(baseLocation.entries, incomingLocation.entries),
+      }
+    } else if (baseLocation) {
+      merged[key] = baseLocation
+    } else if (incomingLocation) {
+      merged[key] = incomingLocation
+    }
+  }
+
+  return merged
+}
+
+function mergeNamedTagSections(
+  base: DiaryCatalog['activities'],
+  incoming: DiaryCatalog['activities'],
+): DiaryCatalog['activities'] {
+  const merged: DiaryCatalog['activities'] = {}
+  const allKeys = new Set([...Object.keys(base), ...Object.keys(incoming)])
+
+  for (const key of allKeys) {
+    const baseTag = base[key]
+    const incomingTag = incoming[key]
+
+    if (baseTag && incomingTag) {
+      merged[key] = {
+        color: resolveTagColor(baseTag.color, incomingTag.color),
+        pinned: baseTag.pinned === true || incomingTag.pinned === true,
+        entries: mergeReferences(baseTag.entries, incomingTag.entries),
+      }
+    } else if (baseTag) {
+      merged[key] = baseTag
+    } else if (incomingTag) {
+      merged[key] = incomingTag
+    }
+  }
+
+  return merged
+}
+
+function resolveTagColor(baseColor: string, incomingColor: string): string {
+  const baseIsGray = baseColor === DEFAULT_TAG_COLOR
+  const incomingIsGray = incomingColor === DEFAULT_TAG_COLOR
+
+  if (!incomingIsGray && baseIsGray)
+    return incomingColor
+
+  return baseColor
+}
+
 export function serializeDiaryCatalog(source: DiaryEntry[] | DiaryCatalog, settings?: AppSettings): string {
   const catalog = Array.isArray(source) ? buildDiaryCatalog(source) : source
   return `${JSON.stringify(settings ? applySettingsToDiaryCatalog(catalog, settings) : catalog, null, 2)}\n`

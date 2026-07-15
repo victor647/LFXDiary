@@ -2,6 +2,7 @@ import { periodConfig, weatherCodeText } from '../domain/constants'
 import type { AppSettings, City, Period, TemperatureColorBand, WeatherSample } from '../domain/types'
 import { formatCityDisplayName } from './city'
 import { getTagBackgroundColor } from './colors'
+import { getRuntimeNasProxyMode } from './runtimeConfig'
 
 type WeatherDataSourceSettings = Pick<AppSettings, 'aliyunAirAppCode'>
 
@@ -623,6 +624,7 @@ const ALIYUN_AIR_CITY_NAMES: Record<string, string> = {
 
 function getCnemcAirUrl(path: string): URL {
   const shouldUseProxy =
+    getRuntimeNasProxyMode() !== 'direct' &&
     typeof window !== 'undefined' &&
     (window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname))
   const baseUrl = shouldUseProxy
@@ -635,6 +637,7 @@ function getCnemcAirUrl(path: string): URL {
 
 function getAliyunAirUrl(path: string): URL {
   const shouldUseProxy =
+    getRuntimeNasProxyMode() !== 'direct' &&
     typeof window !== 'undefined' &&
     (window.location.protocol === 'app:' || ['127.0.0.1', 'localhost'].includes(window.location.hostname))
   const baseUrl = shouldUseProxy

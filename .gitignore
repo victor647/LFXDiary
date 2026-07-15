@@ -13,6 +13,7 @@ dist
 release
 dist-ssr
 *.local
+android/
 
 # Editor directories and files
 .vscode/*

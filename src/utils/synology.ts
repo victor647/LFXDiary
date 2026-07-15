@@ -4,7 +4,10 @@ import {
 
   WEATHER_CODES_FILE_NAME,
 
+  buildDiaryCatalog,
+
   deserializeDiaryCatalog,
+  mergeDiaryCatalogs,
   serializeDiaryCatalog,
   serializeWeatherCodes,
 
@@ -106,15 +109,18 @@ export async function uploadEntriesToSynology(
       onProgress?.(index + 1, entries.length, entry.diaryDate)
     }
 
-    // Backup existing catalog before overwriting
+    // Download remote catalog for merge, then backup
+    const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder)
     await backupExistingCatalogOnNas(baseUrl, session, settings)
 
+    const localCatalog = buildDiaryCatalog(catalogEntries)
+    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
     await uploadTextFile(
       baseUrl,
       session,
       settings.markdownFolder,
       DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(catalogEntries, settings),
+      serializeDiaryCatalog(mergedCatalog, settings),
       'application/json;charset=utf-8',
     )
     await uploadTextFile(
@@ -140,15 +146,18 @@ export async function deleteEntryFromSynology(entry: DiaryEntry, settings: AppSe
   try {
     await deleteFileFromSynology(baseUrl, session, getEntryMarkdownPath(settings.markdownFolder, entry))
 
-    // Backup existing catalog before overwriting
+    // Download remote catalog for merge, then backup
+    const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder)
     await backupExistingCatalogOnNas(baseUrl, session, settings)
 
+    const localCatalog = buildDiaryCatalog(catalogEntries)
+    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
     await uploadTextFile(
       baseUrl,
       session,
       settings.markdownFolder,
       DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(catalogEntries, settings),
+      serializeDiaryCatalog(mergedCatalog, settings),
       'application/json;charset=utf-8',
     )
     await uploadTextFile(
@@ -257,15 +266,17 @@ async function uploadDiaryCatalogToSynologyMode(
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
-    // Backup existing catalog before overwriting
+    // Download remote catalog for merge, then backup
+    const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
     await backupExistingCatalogOnNas(baseUrl, session, settings, requestOptions)
 
+    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog
     await uploadTextFile(
       baseUrl,
       session,
       settings.markdownFolder,
       DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(catalog, settings),
+      serializeDiaryCatalog(mergedCatalog, settings),
       'application/json;charset=utf-8',
       requestOptions,
     )

@@ -161,3 +161,45 @@ function joinGitPath(...parts: string[]): string {
 function normalizeGitPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 }
+
+export function normalizeBodyText(content: string): string {
+  return content.replace(/\r\n/g, '\n')
+}
+
+export function formatImportSourceLabel(files: File[]): string {
+  if (files.length === 1)
+    return files[0].name
+
+  return `${files.length} files`
+}
+
+export function getImportStatusMessage(
+  fileName: string,
+  importedCount: number,
+  addedTags: string[],
+  addedPeople: string[],
+  weatherFailureCount: number,
+  encryptedCount: number,
+  unsupportedCount: number,
+): string {
+  const detailParts = [
+    addedTags.length ? `Added ${addedTags.length} activity ${addedTags.length === 1 ? 'tag' : 'tags'}` : '',
+    addedPeople.length ? `Added ${addedPeople.length} people ${addedPeople.length === 1 ? 'tag' : 'tags'}` : '',
+    weatherFailureCount ? `${weatherFailureCount} weather ${weatherFailureCount === 1 ? 'fetch' : 'fetches'} failed` : '',
+    encryptedCount ? `Skipped ${encryptedCount} encrypted ${encryptedCount === 1 ? 'note' : 'notes'}` : '',
+    unsupportedCount ? `Skipped ${unsupportedCount} unsupported ${unsupportedCount === 1 ? 'note' : 'notes'}` : '',
+  ].filter(Boolean)
+  const details = detailParts.length ? ` ${detailParts.join('. ')}.` : ''
+
+  return `Imported ${importedCount} ${importedCount === 1 ? 'entry' : 'entries'} from ${fileName}.${details} Click Push to upload.`
+}
+
+export function getEmptyImportStatusMessage(fileName: string, encryptedCount: number, unsupportedCount: number): string {
+  if (encryptedCount)
+    return `No entries imported from ${fileName}. ${encryptedCount} encrypted ${encryptedCount === 1 ? 'note uses' : 'notes use'} base64:aes, which cannot be read without the export key.`
+
+  if (unsupportedCount)
+    return `No entries imported from ${fileName}. ${unsupportedCount} unsupported ${unsupportedCount === 1 ? 'note' : 'notes'} found.`
+
+  return `No importable notes found in ${fileName}.`
+}
