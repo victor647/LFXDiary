@@ -95,6 +95,7 @@ export type TemperatureColorBand = {
 export type TemperatureThresholds = Record<string, number>
 
 export type AppSettings = {
+  theme: 'light' | 'dark' | 'system'
   syncProvider: SyncProvider
   nasMode: NasConnectionMode
   lanNasUrl: string

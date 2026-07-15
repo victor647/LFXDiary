@@ -4,22 +4,22 @@ export function getMoodBackgroundColor(mood: MoodScore): string {
   const averageMood = (mood.morning + mood.afternoon + mood.evening) / 3
 
   if (averageMood < 5)
-    return '#eff6ff'
+    return 'var(--mood-low-bg, #eff6ff)'
 
   if (averageMood > 7)
-    return '#fff1f7'
+    return 'var(--mood-high-bg, #fff1f7)'
 
-  return '#effaf1'
+  return 'var(--mood-mid-bg, #effaf1)'
 }
 
 export function getMoodAccentColor(score: number): string {
   if (score < 5)
-    return '#60a5fa'
+    return 'var(--mood-low-accent, #60a5fa)'
 
   if (score < 8)
-    return '#4ade80'
+    return 'var(--mood-mid-accent, #4ade80)'
 
-  return '#f9a8d4'
+  return 'var(--mood-high-accent, #f9a8d4)'
 }
 
 export function getTagBackgroundColor(color: string): string {

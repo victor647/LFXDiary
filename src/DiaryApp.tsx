@@ -129,6 +129,21 @@ export function DiaryApp() {
   useEffect(() => { setDraft((current) => syncEntryRichTextTagColors(current, settings)) }, [draft.id, settings])
   useEffect(() => { hasUnsavedEntriesRef.current = hasUnsavedEntries }, [hasUnsavedEntries])
   useEffect(() => {
+    const resolved = settings.theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : settings.theme
+    document.documentElement.setAttribute('data-theme', resolved)
+  }, [settings.theme])
+  useEffect(() => {
+    if (settings.theme !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => {
+      document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light')
+    }
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [settings.theme])
+  useEffect(() => {
     function cbc(e: BeforeUnloadEvent) { if (allowCloseRef.current || !hasUnsavedEntriesRef.current) return; e.preventDefault(); e.returnValue = ''; setPendingCloseConfirmation(true) }
     window.addEventListener('beforeunload', cbc); return () => window.removeEventListener('beforeunload', cbc)
   }, [])

@@ -8,6 +8,7 @@ import {
   HardDrive,
   Leaf,
   MapPin,
+  Monitor,
   Network,
   PersonStanding,
   Pin,
@@ -490,6 +491,36 @@ export function SettingsPage({
       </div>
 
       <div className="settings-body">
+        <div className="settings-category settings-category-appearance" hidden={!isSettingsPage}>Appearance</div>
+        <div className="settings-section settings-appearance-section" hidden={!isSettingsPage}>
+          <div className="settings-section-title">
+            <Monitor size={16} />
+            Theme
+          </div>
+          <div className="settings-mode-control">
+            <button
+              className={settings.theme === 'light' ? 'selected' : ''}
+              type="button"
+              onClick={() => onSettingsChange({ ...settings, theme: 'light' })}
+            >
+              Light
+            </button>
+            <button
+              className={settings.theme === 'dark' ? 'selected' : ''}
+              type="button"
+              onClick={() => onSettingsChange({ ...settings, theme: 'dark' })}
+            >
+              Dark
+            </button>
+            <button
+              className={settings.theme === 'system' ? 'selected' : ''}
+              type="button"
+              onClick={() => onSettingsChange({ ...settings, theme: 'system' })}
+            >
+              System
+            </button>
+          </div>
+        </div>
         <div className="settings-category settings-category-personal" hidden={!isSettingsPage}>Personal Information</div>
         <div className="settings-category settings-category-sync" hidden={!isSettingsPage}>Network Sync</div>
         <div className="settings-category settings-category-tags" hidden={!isCatalogPage}>

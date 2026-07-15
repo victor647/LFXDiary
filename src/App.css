@@ -54,8 +54,8 @@
 }
 
 .settings-button.selected {
-  border-color: #1d3557;
-  color: #1d3557;
+  border-color: var(--accent, #1d3557);
+  color: var(--accent, #1d3557);
 }
 
 .brand p,
@@ -94,7 +94,7 @@ button,
   gap: 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--text-strong);
   font: inherit;
   font-size: 13px;
@@ -103,8 +103,8 @@ button,
 
 button:hover,
 .import-button:hover {
-  border-color: #457b9d;
-  color: #1d3557;
+  border-color: var(--hover, #457b9d);
+  color: var(--accent, #1d3557);
 }
 
 input,
@@ -114,7 +114,7 @@ select {
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -177,16 +177,16 @@ label {
   justify-content: center;
   min-height: 30px;
   padding: 0;
-  border-color: #d7dde6;
-  background: #ffffff;
+  border-color: var(--border-alt, #d7dde6);
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
 .tag-filter-kind-button:hover,
 .tag-filter-kind-button.selected {
-  border-color: #457b9d;
-  background: #edf4f8;
-  color: #1d3557;
+  border-color: var(--hover, #457b9d);
+  background: var(--selected-bg, #edf4f8);
+  color: var(--accent, #1d3557);
 }
 
 .tag-filter-selector-popover {
@@ -217,9 +217,9 @@ label {
 }
 
 .tag-filter-trigger.active {
-  border-color: #457b9d;
-  background: #edf4f8;
-  color: #1d3557;
+  border-color: var(--hover, #457b9d);
+  background: var(--selected-bg, #edf4f8);
+  color: var(--accent, #1d3557);
 }
 
 .tag-filter-menu {
@@ -232,7 +232,7 @@ label {
   align-items: start;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
 }
 
@@ -261,8 +261,8 @@ label {
 
 .tag-filter-menu-column button:hover,
 .tag-filter-menu-column button.selected {
-  background: #edf4f8;
-  color: #1d3557;
+  background: var(--selected-bg, #edf4f8);
+  color: var(--accent, #1d3557);
 }
 
 .tag-filter-menu-column button > span:not(.tag-filter-color-dot) {
@@ -361,7 +361,7 @@ label {
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
 }
 
@@ -372,7 +372,7 @@ label {
 }
 
 .context-menu .danger-menu-item {
-  color: #b91c1c;
+  color: var(--danger-text, #b91c1c);
 }
 
 .decade-toggle,
@@ -388,7 +388,7 @@ label {
 .year-toggle.selected,
 .month-group.selected > .month-tab,
 .entry-item.selected {
-  border-color: #1d3557;
+  border-color: var(--accent, #1d3557);
 }
 
 .notebook-range-label {
@@ -606,7 +606,7 @@ label {
 
 .entry-weather-icon.empty {
   border: 1px dashed var(--border);
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: transparent;
 }
 
@@ -663,7 +663,7 @@ label {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -702,15 +702,15 @@ label {
 
 .settings-save-button {
   min-width: 140px;
-  background: #1d3557;
-  border-color: #1d3557;
+  background: var(--button-primary, #1d3557);
+  border-color: var(--accent, #1d3557);
   color: #ffffff;
   font-weight: 700;
 }
 
 .settings-save-button:hover {
-  background: #27496f;
-  border-color: #27496f;
+  background: var(--button-primary-hover, #27496f);
+  border-color: var(--button-primary-hover, #27496f);
   color: #ffffff;
 }
 
@@ -734,6 +734,14 @@ label {
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.settings-category-appearance {
+  order: 5;
+}
+
+.settings-appearance-section {
+  order: 6;
 }
 
 .settings-category-personal {
@@ -824,9 +832,9 @@ label {
 }
 
 .settings-mode-control button.selected {
-  border-color: #1d3557;
-  background: #edf4f8;
-  color: #1d3557;
+  border-color: var(--accent, #1d3557);
+  background: var(--selected-bg, #edf4f8);
+  color: var(--accent, #1d3557);
   font-weight: 700;
 }
 
@@ -837,7 +845,7 @@ label {
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
   font-size: 12px;
 }
 
@@ -866,7 +874,7 @@ label {
   padding: 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
 }
 
 .tag-manager-list-title {
@@ -892,8 +900,8 @@ label {
   min-height: 28px;
   flex: 0 0 28px;
   padding: 0;
-  border-color: #d7dde6;
-  background: #ffffff;
+  border-color: var(--border-alt, #d7dde6);
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
   opacity: 0;
   transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -905,7 +913,7 @@ label {
 }
 
 .tag-manager-clear-icon-button:hover:not(:disabled) {
-  border-color: #9aa8ba;
+  border-color: var(--input-placeholder, #9aa8ba);
   color: var(--text-strong);
 }
 
@@ -928,7 +936,7 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .tag-manager-name {
@@ -978,7 +986,7 @@ label {
 }
 
 .tag-manager-palette button.selected {
-  outline: 2px solid #1d3557;
+  outline: 2px solid var(--accent, #1d3557);
   outline-offset: 1px;
 }
 
@@ -1001,12 +1009,12 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .activity-manager-group.expanded {
-  border-color: #1d3557;
-  background: #edf4f8;
+  border-color: var(--accent, #1d3557);
+  background: var(--selected-bg, #edf4f8);
 }
 
 .tag-manager-color-row {
@@ -1042,7 +1050,7 @@ label {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .tag-manager-chip-item {
@@ -1067,7 +1075,7 @@ label {
   border-left: 0;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1085,7 +1093,7 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .temperature-settings-preview {
@@ -1254,7 +1262,7 @@ label {
   max-width: 28px;
   padding: 0;
   border-style: dashed;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1271,7 +1279,7 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
@@ -1302,7 +1310,7 @@ label {
 .activity-recent-popover .activity-color-toggle {
   justify-content: space-between;
   border-color: var(--border);
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
   color: var(--text-strong);
 }
 
@@ -1342,14 +1350,14 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
 .activity-color-options .activity-add-toggle {
   justify-content: center;
   border-style: dashed;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1361,7 +1369,7 @@ label {
 
 .activity-recent-popover .activity-other-option {
   border-style: dashed;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1370,7 +1378,7 @@ label {
 .entry-body {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -1424,7 +1432,7 @@ label {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
 }
 
 .date-birth-counter {
@@ -1456,7 +1464,7 @@ label {
   min-height: 32px;
   border: 0;
   border-radius: 0;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   padding: 0;
 }
 
@@ -1465,7 +1473,7 @@ label {
 }
 
 .date-step-buttons button:disabled {
-  color: #c7ced8;
+  color: var(--border-alt, #c7ced8);
   cursor: not-allowed;
 }
 
@@ -1508,8 +1516,8 @@ label {
   width: 24px;
   min-height: 24px;
   padding: 0;
-  border-color: #d7dde6;
-  background: #ffffff;
+  border-color: var(--border-alt, #d7dde6);
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1521,7 +1529,7 @@ label {
 }
 
 .tag-panel-title-icon-button:hover:not(:disabled) {
-  border-color: #9aa8ba;
+  border-color: var(--input-placeholder, #9aa8ba);
   color: var(--text-strong);
 }
 
@@ -1577,7 +1585,7 @@ label {
   width: 28px;
   padding: 0;
   border-style: dashed;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1592,7 +1600,7 @@ label {
   padding: 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
@@ -1604,7 +1612,7 @@ label {
 
 .location-recent-popover .location-other-option {
   border-style: dashed;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--muted);
 }
 
@@ -1639,7 +1647,7 @@ label {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
 }
 
@@ -1670,7 +1678,7 @@ label {
   height: 44px;
   place-items: center;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: var(--muted-bg, #f1f5f9);
   color: var(--accent);
   animation: sync-progress-spin 0.85s linear infinite;
 }
@@ -1742,7 +1750,7 @@ label {
   padding: 8px 10px 8px 28px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
   color: var(--text-strong);
   font-size: 13px;
   line-height: 1.45;
@@ -1775,7 +1783,7 @@ label {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
 }
 
 .pull-diff-pane h3 {
@@ -1791,7 +1799,7 @@ label {
   min-height: 260px;
   overflow: auto;
   padding: 8px 0;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.45;
@@ -1808,7 +1816,7 @@ label {
 }
 
 .pull-diff-line.added {
-  background: #ecfdf3;
+  background: var(--success-bg, #ecfdf3);
 }
 
 .pull-diff-line.removed {
@@ -1857,9 +1865,9 @@ label {
 }
 
 .city-results button.selected {
-  border-color: #1d3557;
-  background: #edf4f8;
-  color: #1d3557;
+  border-color: var(--accent, #1d3557);
+  background: var(--selected-bg, #edf4f8);
+  color: var(--accent, #1d3557);
 }
 
 .dialog-actions {
@@ -1870,31 +1878,31 @@ label {
 
 .dialog-actions .danger-button {
   margin-right: auto;
-  border-color: #fca5a5;
-  background: #fff5f5;
-  color: #b91c1c;
+  border-color: var(--danger-text, #fca5a5);
+  background: var(--danger-bg, #fff5f5);
+  color: var(--danger-text, #b91c1c);
 }
 
 .dialog-actions .danger-button:hover {
-  border-color: #ef4444;
+  border-color: var(--danger-text, #ef4444);
   color: #991b1b;
 }
 
 .dialog-actions button:last-child {
-  background: #1d3557;
-  border-color: #1d3557;
+  background: var(--button-primary, #1d3557);
+  border-color: var(--accent, #1d3557);
   color: #ffffff;
 }
 
 .delete-entry-dialog .dialog-actions .danger-button {
   margin-right: 0;
-  border-color: #fca5a5;
-  background: #fff5f5;
-  color: #b91c1c;
+  border-color: var(--danger-text, #fca5a5);
+  background: var(--danger-bg, #fff5f5);
+  color: var(--danger-text, #b91c1c);
 }
 
 .delete-entry-dialog .dialog-actions .danger-button:hover {
-  border-color: #ef4444;
+  border-color: var(--danger-text, #ef4444);
   background: #fee2e2;
   color: #991b1b;
 }
@@ -1928,7 +1936,7 @@ label {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 12px 28px rgb(15 23 42 / 16%);
 }
 
@@ -1940,7 +1948,7 @@ label {
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   color: var(--text-strong);
   font-size: 12px;
   text-align: left;
@@ -1969,7 +1977,7 @@ label {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
@@ -1995,7 +2003,7 @@ label {
 }
 
 .tag-color-swatch.selected {
-  border-color: #111827;
+  border-color: var(--text-strong, #111827);
   box-shadow: 0 0 0 2px #ffffff inset;
 }
 
@@ -2049,7 +2057,7 @@ label {
 }
 
 .mood-rating-bar button.selected {
-  color: #111827;
+  color: var(--text-strong, #111827);
   font-weight: 700;
 }
 
@@ -2069,7 +2077,7 @@ label {
   padding: 5px 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .daily-weather-icon {
@@ -2134,7 +2142,7 @@ label {
   padding: 5px 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fbfcfd;
+  background: var(--panel-bg, #fbfcfd);
 }
 
 .temperature-card-heading {
@@ -2159,7 +2167,7 @@ label {
 }
 
 .temperature-main-row strong {
-  color: #111827;
+  color: var(--text-strong, #111827);
   font-size: 15px;
   line-height: 1.2;
 }
@@ -2232,7 +2240,7 @@ label {
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--card-bg, #ffffff);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
@@ -2248,8 +2256,8 @@ label {
 }
 
 .weather-location-option.selected {
-  border-color: #1d3557;
-  background: #edf4f8;
+  border-color: var(--accent, #1d3557);
+  background: var(--selected-bg, #edf4f8);
 }
 
 .suggestions {
@@ -2361,15 +2369,15 @@ label {
   justify-self: end;
   min-width: 120px;
   min-height: 34px;
-  background: #1d3557;
-  border-color: #1d3557;
+  background: var(--button-primary, #1d3557);
+  border-color: var(--accent, #1d3557);
   color: #ffffff;
   font-weight: 700;
 }
 
 .entry-save-button:hover {
-  background: #27496f;
-  border-color: #27496f;
+  background: var(--button-primary-hover, #27496f);
+  border-color: var(--button-primary-hover, #27496f);
   color: #ffffff;
 }
 
@@ -2407,5 +2415,105 @@ label {
 
   .pull-diff-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── Dark theme overrides ── */
+
+[data-theme="dark"] {
+  .sync-progress-spinner {
+    background: var(--muted-bg);
+  }
+
+  .sync-progress-track {
+    background: var(--hover);
+  }
+
+  .sync-progress-bar {
+    background: var(--accent);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--input-placeholder);
+  }
+
+  .settings-preview {
+    background: var(--panel-bg);
+  }
+
+  .dialog {
+    background: var(--dialog-bg);
+  }
+
+  .dialog-message {
+    color: var(--text);
+  }
+
+  .entry-rich-text-shell {
+    background: var(--input-bg);
+  }
+
+  .entry-rich-text-input {
+    color: var(--text);
+    caret-color: var(--text);
+  }
+
+  .entry-rich-text-input::placeholder {
+    color: var(--input-placeholder);
+  }
+
+  .context-menu {
+    background: var(--dialog-bg);
+    border-color: var(--border);
+  }
+
+  .tag-color-palette {
+    background: var(--dialog-bg);
+    border-color: var(--border);
+  }
+
+  .city-results {
+    background: var(--dialog-bg);
+    border-color: var(--border);
+  }
+
+  .date-stepper button {
+    background: var(--card-bg);
+    color: var(--text);
+  }
+
+  .date-stepper button.selected {
+    background: var(--button-primary);
+    color: var(--button-primary-text);
+  }
+
+  .pull-diff-line.added {
+    background: var(--success-bg);
+  }
+
+  .pull-diff-line.removed {
+    background: var(--danger-bg);
+  }
+
+  .pull-diff-pane {
+    background: var(--card-bg);
+  }
+
+  .sync-error-dialog pre {
+    color: var(--text);
+  }
+
+  .tag-filter-trigger {
+    background: var(--card-bg);
+  }
+
+  .tag-filter-dropdown {
+    background: var(--dialog-bg);
+    border-color: var(--border);
+  }
+
+  .notebook-list {
+    background: var(--sidebar);
   }
 }

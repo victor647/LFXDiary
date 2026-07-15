@@ -1,10 +1,35 @@
-:root {
+:root,
+[data-theme="light"] {
   --surface: #f7f8fa;
   --sidebar: #fbfcfd;
   --border: #d9dee5;
   --text: #344054;
   --text-strong: #111827;
   --muted: #667085;
+  --accent: #1d3557;
+  --hover: #457b9d;
+  --card-bg: #ffffff;
+  --input-bg: #ffffff;
+  --dialog-bg: #ffffff;
+  --panel-bg: #fbfcfd;
+  --tag-bg: #edf4f8;
+  --button-primary: #1d3557;
+  --button-primary-text: #ffffff;
+  --button-primary-hover: #27496f;
+  --selected-bg: #edf4f8;
+  --selected-text: #1d3557;
+  --border-alt: #d7dde6;
+  --muted-bg: #f1f5f9;
+  --danger-text: #b91c1c;
+  --danger-bg: #fff5f5;
+  --success-bg: #ecfdf3;
+  --input-placeholder: #9aa8ba;
+  --mood-low-bg: #eff6ff;
+  --mood-mid-bg: #effaf1;
+  --mood-high-bg: #fff1f7;
+  --mood-low-accent: #60a5fa;
+  --mood-mid-accent: #4ade80;
+  --mood-high-accent: #f9a8d4;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
@@ -15,6 +40,41 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme="dark"] {
+  --surface: #0a0a0a;
+  --sidebar: #141414;
+  --border: #2a2a2a;
+  --text: #d4d4d4;
+  --text-strong: #ffffff;
+  --muted: #888888;
+  --accent: #e5e5e5;
+  --hover: #ffffff;
+  --card-bg: #1a1a1a;
+  --input-bg: #1a1a1a;
+  --dialog-bg: #1a1a1a;
+  --panel-bg: #1a1a1a;
+  --tag-bg: #2a2a2a;
+  --button-primary: #ffffff;
+  --button-primary-text: #0a0a0a;
+  --button-primary-hover: #cccccc;
+  --selected-bg: #2a2a2a;
+  --selected-text: #e5e5e5;
+  --border-alt: #3a3a3a;
+  --muted-bg: #1f1f1f;
+  --danger-text: #fca5a5;
+  --danger-bg: #450a0a;
+  --success-bg: #064e3b;
+  --input-placeholder: #666666;
+  --mood-low-bg: #1a2a3d;
+  --mood-mid-bg: #1a2d1f;
+  --mood-high-bg: #2d1a24;
+  --mood-low-accent: #93c5fd;
+  --mood-mid-accent: #6ee7b7;
+  --mood-high-accent: #f0abcc;
+
+  color-scheme: dark;
 }
 
 * {

@@ -15,6 +15,7 @@ import type { AppSettings, TemperatureColorBand, TemperatureThresholds } from '.
 import { normalizePersonTag, normalizePointOfInterestTag } from './tags'
 
 export const defaultSettings: AppSettings = {
+  theme: 'system' as const,
   syncProvider: 'nas',
   nasMode: 'lan',
   lanNasUrl: DEFAULT_LAN_NAS_URL,
@@ -74,6 +75,7 @@ export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
       : settings.markdownFolder || DEFAULT_MARKDOWN_FOLDER
 
   return {
+    theme: settings.theme === 'dark' ? 'dark' : settings.theme === 'system' ? 'system' : 'light',
     syncProvider: settings.syncProvider === 'git' ? 'git' : 'nas',
     nasMode: settings.nasMode === 'public' ? 'public' : 'lan',
     lanNasUrl: normalizeNasUrl(settings.lanNasUrl || DEFAULT_LAN_NAS_URL),
