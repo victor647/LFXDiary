@@ -19,6 +19,7 @@ import {
   Thermometer,
   Upload,
   Users,
+  RefreshCw,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useMemo, useRef, useState } from 'react'
@@ -68,6 +69,7 @@ type SettingsPageProps = {
   onSave: () => void
   onExportCatalog: () => void
   onImportCatalog: (file: File) => void
+  onPullCatalog: () => void
   onBack: () => void
 }
 
@@ -91,6 +93,7 @@ export function SettingsPage({
   onSave,
   onExportCatalog,
   onImportCatalog,
+  onPullCatalog,
   onBack,
 }: SettingsPageProps) {
   const isCatalogPage = variant === 'catalog'
@@ -457,6 +460,10 @@ export function SettingsPage({
               <button type="button" className="settings-file-button" onClick={onExportCatalog}>
                 <Download size={16} />
                 Export
+              </button>
+                            <button type="button" className="settings-file-button" onClick={onPullCatalog}>
+                <RefreshCw size={16} />
+                Pull
               </button>
               <button type="button" className="settings-file-button" onClick={() => catalogImportInputRef.current?.click()}>
                 <Upload size={16} />
@@ -1197,3 +1204,4 @@ function TagManagerList<TTag extends DiaryTag>({
     </div>
   )
 }
+

@@ -2,12 +2,18 @@ import LightningFS from '@isomorphic-git/lightning-fs'
 import * as git from 'isomorphic-git'
 import type { GitHttpRequest, GitHttpResponse } from 'isomorphic-git/http/web'
 import type { AppSettings, DiaryCatalog, DiaryEntry } from '../domain/types'
+import type { DiaryPullOptions } from '../application/diarySync'
+
+const CATALOG_BACKUP_FOLDER = '.backup'
 import {
   DIARY_CATALOG_FILE_NAME,
+
   WEATHER_CODES_FILE_NAME,
+
   deserializeDiaryCatalog,
   serializeDiaryCatalog,
   serializeWeatherCodes,
+
 } from '../domain/diaryCatalog'
 import {
   deserializeDiaryEntryMarkdown,
@@ -65,6 +71,17 @@ export async function pushEntriesToGit(
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
+
+  // Backup existing catalog before overwriting
+  const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
+  const existingCatalog = await readOptionalRepoFile(fs, catalogPath)
+  if (existingCatalog) {
+    await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
+    await writeRepoFile(fs, backupPath, existingCatalog)
+  }
+
   await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalogEntries, settings))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   filepaths.push(catalogPath, weatherCodesPath)
@@ -100,13 +117,13 @@ export async function pullEntriesFromGit(
   notebookKey?: string,
   onProgress?: SyncProgressCallback,
 ): Promise<DiaryEntry[]> {
-  return pullNotebookEntriesFromGit(settings, notebookKey ? [notebookKey] : undefined, onProgress)
+  return pullNotebookEntriesFromGit(settings, notebookKey ? [notebookKey] : undefined, onProgress ? { onProgress } : undefined)
 }
 
 export async function pullNotebookEntriesFromGit(
   settings: AppSettings,
   notebookKeys?: string[],
-  onProgress?: SyncProgressCallback,
+  options?: DiaryPullOptions,
 ): Promise<DiaryEntry[]> {
   const fs = await ensureGitRepository(settings)
   await pullGit(fs, settings, false)
@@ -122,10 +139,12 @@ export async function pullNotebookEntriesFromGit(
   for (const [index, filepath] of markdownFiles.entries()) {
     const entry = deserializeDiaryEntryMarkdown(await readRepoFile(fs, filepath), getBaseName(filepath), catalog)
 
-    if (entry)
+    if (entry) {
       entries.push(entry)
+      options?.onEntry?.(entry)
+    }
 
-    onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? getBaseName(filepath))
+    options?.onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? getBaseName(filepath))
   }
 
   return entries
@@ -169,6 +188,22 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
   )
 }
 
+export async function pullDiaryCatalogFromGit(
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryCatalog | null> {
+  const fs = await ensureGitRepository(settings)
+  await pullGit(fs, settings, false)
+
+  onProgress?.(0, 1, 'Pulling catalog from Git')
+  const raw = await readOptionalRepoFile(fs, joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME))
+  onProgress?.(1, 1, DIARY_CATALOG_FILE_NAME)
+
+  if (!raw)
+    return null
+
+  return deserializeDiaryCatalog(raw)
+}
 export async function pushDiaryCatalogToGit(
   catalog: DiaryCatalog,
   settings: AppSettings,
@@ -179,6 +214,17 @@ export async function pushDiaryCatalogToGit(
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
+
+  // Backup existing catalog before overwriting
+  const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
+  const existingCatalog = await readOptionalRepoFile(fs, catalogPath)
+  if (existingCatalog) {
+    await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
+    await writeRepoFile(fs, backupPath, existingCatalog)
+  }
+
   await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(catalog, settings))
   onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
@@ -550,3 +596,4 @@ function normalizeGitPath(path: string): string {
 function getBaseName(filepath: string): string {
   return filepath.split('/').pop() ?? filepath
 }
+

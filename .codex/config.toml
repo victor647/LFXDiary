@@ -1,0 +1,12 @@
+[mcp_servers.codemap]
+command = "C:\\Users\\liuziqi09\\AppData\\Local\\codemap\\codemap.exe"
+args = ["serve"]
+
+# >>> codemap SessionStart >>>
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "bash \"C:\\Users\\liuziqi09\\.codemaker\\codemap\\hook.sh\" \"AGENTS.md\" \".codemaker\\codemap\\graph.db\" \".codemaker\\codemap\\hook-payload.json\""
+# <<< codemap SessionStart <<<

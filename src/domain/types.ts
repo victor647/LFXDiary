@@ -158,6 +158,22 @@ export type DiaryCatalog = {
     pinned?: boolean
     entries: string[]
   }>
+
+  colorNames: {
+    activities: Record<string, string>
+    people: Record<string, string>
+    pointsOfInterest: Record<string, string>
+    locations: Record<string, string>
+  }
+}
+
+export type YearCatalog = {
+  version: 1
+  year: string
+  locations: Record<string, string[]>
+  activities: Record<string, string[]>
+  people: Record<string, string[]>
+  pointsOfInterest: Record<string, string[]>
 }
 
 export type TagFilterKind = 'location' | 'activity' | 'person' | 'pointOfInterest'

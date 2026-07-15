@@ -1,10 +1,13 @@
 import type { AppSettings, DiaryCatalog, DiaryEntry, NasConnectionMode } from '../domain/types'
 import {
   DIARY_CATALOG_FILE_NAME,
+
   WEATHER_CODES_FILE_NAME,
+
   deserializeDiaryCatalog,
   serializeDiaryCatalog,
   serializeWeatherCodes,
+
 } from '../domain/diaryCatalog'
 import {
   deserializeDiaryEntryMarkdown,
@@ -17,6 +20,7 @@ import {
 } from './files'
 import { getRuntimeNasProxyBasePath, getRuntimeNasProxyMode } from './runtimeConfig'
 import { getActiveNasUrl } from './settings'
+import type { DiaryPullOptions } from '../application/diarySync'
 
 type SynologyResponse<T = unknown> = {
   success: boolean
@@ -102,6 +106,9 @@ export async function uploadEntriesToSynology(
       onProgress?.(index + 1, entries.length, entry.diaryDate)
     }
 
+    // Backup existing catalog before overwriting
+    await backupExistingCatalogOnNas(baseUrl, session, settings)
+
     await uploadTextFile(
       baseUrl,
       session,
@@ -132,6 +139,10 @@ export async function deleteEntryFromSynology(entry: DiaryEntry, settings: AppSe
 
   try {
     await deleteFileFromSynology(baseUrl, session, getEntryMarkdownPath(settings.markdownFolder, entry))
+
+    // Backup existing catalog before overwriting
+    await backupExistingCatalogOnNas(baseUrl, session, settings)
+
     await uploadTextFile(
       baseUrl,
       session,
@@ -185,6 +196,57 @@ export async function uploadDiaryCatalogToSynology(
   }
 }
 
+
+export async function downloadDiaryCatalogFromSynology(
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryCatalog | null> {
+  if (!settings.nasUsername.trim() || !settings.nasPassword)
+    throw new Error('Enter your NAS username and password in Settings first.')
+
+  const pullModes = getSynologyPullModes(settings)
+  const primaryMode = pullModes[0]
+
+  if (pullModes.length === 1)
+    return downloadDiaryCatalogFromSynologyMode({ ...settings, nasMode: primaryMode }, onProgress)
+
+  const fallbackMode = pullModes[1]
+
+  try {
+    return await downloadDiaryCatalogFromSynologyMode({ ...settings, nasMode: primaryMode }, onProgress)
+  } catch (error) {
+    if (!shouldFallbackSynologyPull(error))
+      throw error
+
+    onProgress?.(0, 1, `Retrying through ${fallbackMode} NAS connection`)
+
+    try {
+      return await downloadDiaryCatalogFromSynologyMode({ ...settings, nasMode: fallbackMode }, onProgress)
+    } catch (fallbackError) {
+      throw getSynologyPullFallbackError(fallbackError, error, primaryMode, fallbackMode)
+    }
+  }
+}
+
+async function downloadDiaryCatalogFromSynologyMode(
+  settings: AppSettings,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryCatalog | null> {
+  const baseUrl = getSynologyApiBaseUrl(settings)
+  const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
+  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+
+  try {
+    onProgress?.(0, 1, 'Pulling catalog from NAS')
+    const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
+    onProgress?.(1, 1, DIARY_CATALOG_FILE_NAME)
+
+    return catalog ?? null
+  } finally {
+    await logoutFromSynology(baseUrl, session, requestOptions)
+  }
+}
+
 async function uploadDiaryCatalogToSynologyMode(
   catalog: DiaryCatalog,
   settings: AppSettings,
@@ -195,6 +257,9 @@ async function uploadDiaryCatalogToSynologyMode(
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
+    // Backup existing catalog before overwriting
+    await backupExistingCatalogOnNas(baseUrl, session, settings, requestOptions)
+
     await uploadTextFile(
       baseUrl,
       session,
@@ -225,13 +290,13 @@ export async function downloadEntriesFromSynology(
   notebookKey?: string,
   onProgress?: SyncProgressCallback,
 ): Promise<DiaryEntry[]> {
-  return downloadNotebookEntriesFromSynology(settings, notebookKey ? [notebookKey] : undefined, onProgress)
+  return downloadNotebookEntriesFromSynology(settings, notebookKey ? [notebookKey] : undefined, onProgress ? { onProgress } : undefined)
 }
 
 export async function downloadNotebookEntriesFromSynology(
   settings: AppSettings,
   notebookKeys?: string[],
-  onProgress?: SyncProgressCallback,
+  options?: DiaryPullOptions,
 ): Promise<DiaryEntry[]> {
   if (!settings.nasUsername.trim() || !settings.nasPassword)
     throw new Error('Enter your NAS username and password in Settings first.')
@@ -240,12 +305,12 @@ export async function downloadNotebookEntriesFromSynology(
   const primaryMode = pullModes[0]
 
   if (pullModes.length === 1)
-    return downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress)
+    return downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, options)
 
   const fallbackMode = pullModes[1]
   const primaryPull = settleSynologyPull(
     primaryMode,
-    downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
+    downloadEntriesFromSynologyMode({ ...settings, nasMode: primaryMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, options),
   )
   const firstResult = await Promise.race([
     primaryPull,
@@ -261,7 +326,7 @@ export async function downloadNotebookEntriesFromSynology(
 
     const fallbackResult = await settleSynologyPull(
       fallbackMode,
-      downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
+      downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, options),
     )
 
     if (fallbackResult.status === 'fulfilled')
@@ -270,14 +335,14 @@ export async function downloadNotebookEntriesFromSynology(
     throw getSynologyPullFallbackError(fallbackResult.error, firstResult.error, primaryMode, fallbackMode)
   }
 
-  return downloadEntriesWithFallbackRace(settings, primaryPull, primaryMode, fallbackMode, notebookKeys, onProgress)
+  return downloadEntriesWithFallbackRace(settings, primaryPull, primaryMode, fallbackMode, notebookKeys, options)
 }
 
 async function downloadEntriesFromSynologyMode(
   settings: AppSettings,
   requestTimeoutMs: number,
   notebookKeys?: string[],
-  onProgress?: SyncProgressCallback,
+  options?: DiaryPullOptions,
 ): Promise<DiaryEntry[]> {
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs }
@@ -296,10 +361,12 @@ async function downloadEntriesFromSynologyMode(
     for (const [index, file] of markdownFiles.entries()) {
       const entry = deserializeDiaryEntryMarkdown(await downloadMarkdownFile(baseUrl, session, file.path, requestOptions), file.name, catalog)
 
-      if (entry)
+      if (entry) {
         entries.push(entry)
+        options?.onEntry?.(entry)
+      }
 
-      onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? file.name)
+      options?.onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? file.name)
     }
 
     return entries
@@ -314,11 +381,11 @@ async function downloadEntriesWithFallbackRace(
   primaryMode: NasConnectionMode,
   fallbackMode: NasConnectionMode,
   notebookKeys?: string[],
-  onProgress?: SyncProgressCallback,
+  options?: DiaryPullOptions,
 ): Promise<DiaryEntry[]> {
   const fallbackPull = settleSynologyPull(
     fallbackMode,
-    downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, onProgress),
+    downloadEntriesFromSynologyMode({ ...settings, nasMode: fallbackMode }, PULL_REQUEST_TIMEOUT_MS, notebookKeys, options),
   )
   const firstResult = await Promise.race([primaryPull, fallbackPull])
 
@@ -758,6 +825,75 @@ async function parseSynologyResponse<T>(response: Response, phase: string, endpo
       `${error instanceof Error ? error.message : String(error)}. ${getNonJsonResponseSummary(response, text)}`,
     )
   }
+}
+
+const CATALOG_BACKUP_FOLDER = '.backup'
+
+async function backupExistingCatalogOnNas(
+  baseUrl: string,
+  session: SynologySession,
+  settings: AppSettings,
+  options: SynologyRequestOptions = {},
+) {
+  const catalogPath = `${settings.markdownFolder}/${DIARY_CATALOG_FILE_NAME}`
+  const backupFolder = `${settings.markdownFolder}/${CATALOG_BACKUP_FOLDER}`
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupName = `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`
+
+  try {
+    // Ensure .backup folder exists (best-effort)
+    await createFolderOnNas(baseUrl, session, backupFolder, options)
+  } catch {
+    // Folder may already exist; proceed
+  }
+
+  try {
+    // Copy existing catalog to .backup/<name>.<timestamp>.json
+    await copyFileOnNas(baseUrl, session, catalogPath, `${backupFolder}/${backupName}`, options)
+  } catch {
+    // If catalog doesn't exist yet (first push), that's fine
+  }
+}
+
+async function createFolderOnNas(
+  baseUrl: string,
+  session: SynologySession,
+  folderPath: string,
+  options: SynologyRequestOptions = {},
+) {
+  const url = makeAuthedSynologyUrl(baseUrl, session)
+  const body = new URLSearchParams({
+    api: 'SYNO.FileStation.CreateFolder',
+    version: '2',
+    method: 'create',
+    folder_path: folderPath,
+    name: '',
+    force_parent: 'true',
+  })
+  const response = await fetchSynology(url, { method: 'POST', body }, 'create folder', options)
+  await parseSynologyResponse(response, 'create folder', url.toString())
+}
+
+async function copyFileOnNas(
+  baseUrl: string,
+  session: SynologySession,
+  srcPath: string,
+  destPath: string,
+  options: SynologyRequestOptions = {},
+) {
+  const url = makeAuthedSynologyUrl(baseUrl, session)
+  const body = new URLSearchParams({
+    api: 'SYNO.FileStation.CopyMove',
+    version: '2',
+    method: 'start',
+    path: srcPath,
+    dest_folder_path: destPath.substring(0, destPath.lastIndexOf('/')),
+    remove_src: 'false',
+    overwrite: 'true',
+    accurate_progress: 'false',
+  })
+  const response = await fetchSynology(url, { method: 'POST', body }, 'copy file', options)
+  await parseSynologyResponse(response, 'copy file', url.toString())
 }
 
 function getNonJsonResponseSummary(response: Response, text: string): string {

@@ -1628,7 +1628,8 @@ label {
 .delete-entry-dialog,
 .force-push-dialog,
 .push-success-dialog,
-.unsaved-close-dialog,
+.autosave-recovery-dialog,
+  .unsaved-close-dialog,
 .sync-progress-dialog,
 .sync-error-dialog,
 .pull-conflict-dialog {
@@ -1716,7 +1717,8 @@ label {
 .delete-entry-dialog p,
 .force-push-dialog p,
 .push-success-dialog p,
-.unsaved-close-dialog p,
+.autosave-recovery-dialog p,
+  .unsaved-close-dialog p,
 .sync-progress-dialog p,
 .pull-conflict-dialog p {
   margin: 0;

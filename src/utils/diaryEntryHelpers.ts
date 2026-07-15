@@ -56,14 +56,21 @@ export function updateEntryLocations(entry: DiaryEntry, locationKey: string, nex
 }
 
 export function updateEntryLocationCity(entry: DiaryEntry, locationKey: string, nextCity: City, color: string): DiaryEntry {
-  let changed = false
+  let colorOnlyChanged = false
+  let cityChanged = false
   const locationColors = { ...entry.locationColors }
   const weatherSamples = entry.weatherSamples.map((sample) => ({ ...sample }))
   const cities = entry.cities.map((city) => {
     if (getLocationNameKey(city) !== locationKey)
       return city
 
-    changed = true
+    if (city.id === nextCity.id) {
+      colorOnlyChanged = true
+      locationColors[city.id] = color
+      return city
+    }
+
+    cityChanged = true
     delete locationColors[city.id]
     locationColors[nextCity.id] = color
 
@@ -75,8 +82,15 @@ export function updateEntryLocationCity(entry: DiaryEntry, locationKey: string, 
     return nextCity
   })
 
-  if (!changed)
+  if (!colorOnlyChanged && !cityChanged)
     return entry
+
+  if (colorOnlyChanged && !cityChanged) {
+    return {
+      ...entry,
+      locationColors,
+    }
+  }
 
   return {
     ...entry,
@@ -140,11 +154,19 @@ export function mergeEntryLocationCity(entry: DiaryEntry, sourceLocationKey: str
   const locationColors = { ...entry.locationColors }
   const weatherSamples = entry.weatherSamples.map((sample) => ({ ...sample }))
   const cities: City[] = []
+  let sameCityColorOnly = false
 
   for (const city of entry.cities) {
     const cityKey = getLocationNameKey(city)
 
     if (cityKey === sourceLocationKey) {
+      if (!targetCityInEntry && targetCity.id === city.id) {
+        sameCityColorOnly = true
+        locationColors[city.id] = color
+        cities.push(city)
+        continue
+      }
+
       delete locationColors[city.id]
 
       const replacementCity = targetCityInEntry ?? targetCity
@@ -166,6 +188,13 @@ export function mergeEntryLocationCity(entry: DiaryEntry, sourceLocationKey: str
       locationColors[city.id] = color
 
     cities.push(city)
+  }
+
+  if (sameCityColorOnly) {
+    return {
+      ...entry,
+      locationColors,
+    }
   }
 
   return {

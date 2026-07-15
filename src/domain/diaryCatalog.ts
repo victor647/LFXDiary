@@ -1,9 +1,10 @@
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, weatherCodeText } from './constants'
 import { normalizePersonTag, normalizePointOfInterestTag, sanitizeTag } from './tags'
-import type { AppSettings, City, DiaryCatalog, DiaryEntry } from './types'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, YearCatalog } from './types'
 import { getCityCatalogKey, isCity } from './metadata/locationMetadata'
 
 export const DIARY_CATALOG_FILE_NAME = 'lfx-diary-catalog.json'
+export const YEAR_CATALOG_FILE_NAME = 'lfx-diary-year-catalog.json'
 export const WEATHER_CODES_FILE_NAME = 'weather-codes.json'
 
 type CatalogLocationMapValue = { city: City; color: string; pinned?: boolean; entries: Set<string> }
@@ -64,6 +65,12 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
           entries: sortReferences(pointOfInterest.entries),
         }]),
     ),
+    colorNames: {
+      activities: {},
+      people: {},
+      pointsOfInterest: {},
+      locations: {},
+    },
   }
 }
 
@@ -223,6 +230,12 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
           entries: sortReferences(pointOfInterest.entries),
         }]),
     ),
+    colorNames: catalog.colorNames ?? {
+      activities: {},
+      people: {},
+      pointsOfInterest: {},
+      locations: {},
+    },
   }
 }
 
@@ -233,6 +246,12 @@ export function applySettingsToDiaryCatalog(catalog: DiaryCatalog, settings: App
     activities: applyNamedTagSettings(catalog.activities, settings.activityTags),
     people: applyNamedTagSettings(catalog.people, settings.peopleTags),
     pointsOfInterest: applyNamedTagSettings(catalog.pointsOfInterest, settings.pointOfInterestTags),
+    colorNames: {
+      activities: settings.activityColorGroupNames,
+      people: settings.personColorGroupNames,
+      pointsOfInterest: settings.pointOfInterestColorGroupNames,
+      locations: settings.locationColorGroupNames,
+    },
   }
 }
 
@@ -242,7 +261,137 @@ export function applyDiaryCatalogToSettings(settings: AppSettings, catalog: Diar
     activityTags: getNamedTagSettings(catalog.activities),
     peopleTags: getNamedTagSettings(catalog.people),
     pointOfInterestTags: getNamedTagSettings(catalog.pointsOfInterest),
+    activityColorGroupNames: catalog.colorNames?.activities ?? settings.activityColorGroupNames,
+    personColorGroupNames: catalog.colorNames?.people ?? settings.personColorGroupNames,
+    pointOfInterestColorGroupNames: catalog.colorNames?.pointsOfInterest ?? settings.pointOfInterestColorGroupNames,
+    locationColorGroupNames: catalog.colorNames?.locations ?? settings.locationColorGroupNames,
   }
+}
+
+
+export function buildYearCatalog(entries: DiaryEntry[], year: string): YearCatalog {
+  const locations = new Map<string, Set<string>>()
+  const activities = new Map<string, Set<string>>()
+  const people = new Map<string, Set<string>>()
+  const pointsOfInterest = new Map<string, Set<string>>()
+
+  for (const entry of entries) {
+    if (!entry.diaryDate.startsWith(year))
+      continue
+
+    const ref = entry.diaryDate
+
+    for (const city of entry.cities)
+      addYearRef(locations, getCityCatalogKey(city), ref)
+
+    for (const tag of entry.tags) {
+      const normalized = sanitizeTag(tag)
+      if (normalized)
+        addYearRef(activities, normalized, ref)
+    }
+
+    for (const person of entry.people ?? []) {
+      const normalized = normalizePersonTag(person)
+      if (normalized)
+        addYearRef(people, normalized, ref)
+    }
+
+    for (const poi of entry.pointsOfInterest ?? []) {
+      const normalized = normalizePointOfInterestTag(poi)
+      if (normalized)
+        addYearRef(pointsOfInterest, normalized, ref)
+    }
+  }
+
+  return {
+    version: 1,
+    year,
+    locations: serializeYearRefMap(locations),
+    activities: serializeYearRefMap(activities),
+    people: serializeYearRefMap(people),
+    pointsOfInterest: serializeYearRefMap(pointsOfInterest),
+  }
+}
+
+export function serializeYearCatalog(catalog: YearCatalog): string {
+  return `${JSON.stringify(catalog, null, 2)}
+`
+}
+
+export function deserializeYearCatalog(raw: string): YearCatalog | null {
+  try {
+    const catalog = JSON.parse(raw) as Partial<YearCatalog>
+    if (catalog.version !== 1 || typeof catalog.year !== 'string')
+      return null
+
+    return {
+      version: 1,
+      year: catalog.year,
+      locations: normalizeYearRefMap(catalog.locations),
+      activities: normalizeYearRefMap(catalog.activities),
+      people: normalizeYearRefMap(catalog.people),
+      pointsOfInterest: normalizeYearRefMap(catalog.pointsOfInterest),
+    }
+  } catch {
+    return null
+  }
+}
+
+export function mergeYearCatalogIntoGlobal(
+  global: DiaryCatalog,
+  yearCatalog: YearCatalog,
+): DiaryCatalog {
+  return {
+    ...global,
+    updatedAt: new Date().toISOString(),
+    locations: mergeYearRefsIntoGlobalSection(global.locations, yearCatalog.locations),
+    activities: mergeYearRefsIntoGlobalSection(global.activities, yearCatalog.activities),
+    people: mergeYearRefsIntoGlobalSection(global.people, yearCatalog.people),
+    pointsOfInterest: mergeYearRefsIntoGlobalSection(global.pointsOfInterest, yearCatalog.pointsOfInterest),
+  }
+}
+
+function addYearRef(map: Map<string, Set<string>>, key: string, ref: string) {
+  const existing = map.get(key)
+  if (existing) {
+    existing.add(ref)
+  } else {
+    map.set(key, new Set([ref]))
+  }
+}
+
+function serializeYearRefMap(map: Map<string, Set<string>>): Record<string, string[]> {
+  const result: Record<string, string[]> = {}
+  for (const [key, refs] of map)
+    result[key] = Array.from(refs).sort((a, b) => a.localeCompare(b))
+  return result
+}
+
+function normalizeYearRefMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object')
+    return {}
+  const result: Record<string, string[]> = {}
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(val))
+      result[key] = val.filter((v): v is string => typeof v === 'string').sort((a, b) => a.localeCompare(b))
+  }
+  return result
+}
+
+function mergeYearRefsIntoGlobalSection<T extends { entries: string[] }>(
+  globalSection: Record<string, T>,
+  yearRefs: Record<string, string[]>,
+): Record<string, T> {
+  const next: Record<string, T> = {}
+  // Copy existing entries, filtering out any that start with this year
+  for (const [key, value] of Object.entries(globalSection)) {
+    const yearEntries = yearRefs[key]
+    const otherYears = value.entries.filter((ref) => {
+      return !yearEntries?.includes(ref)
+    })
+    next[key] = { ...value, entries: mergeReferences(otherYears, yearEntries ?? []) }
+  }
+  return next
 }
 
 export function serializeDiaryCatalog(source: DiaryEntry[] | DiaryCatalog, settings?: AppSettings): string {
@@ -268,6 +417,7 @@ export function deserializeDiaryCatalog(raw: string): DiaryCatalog | null {
       activities: normalizeCatalogActivities(catalog.activities),
       people: normalizeCatalogActivities(catalog.people),
       pointsOfInterest: normalizeCatalogActivities(catalog.pointsOfInterest),
+      colorNames: normalizeColorNames(catalog.colorNames),
     }
   } catch {
     return null
@@ -481,6 +631,30 @@ function addReference(references: Set<string> | undefined, entryId: string): Set
   const nextReferences = new Set(references)
   nextReferences.add(entryId)
   return nextReferences
+}
+
+function normalizeColorNames(value: unknown): DiaryCatalog['colorNames'] {
+  if (!value || typeof value !== 'object') {
+    return { activities: {}, people: {}, pointsOfInterest: {}, locations: {} }
+  }
+  const names = value as Record<string, unknown>
+  return {
+    activities: normalizeColorNameMap(names.activities),
+    people: normalizeColorNameMap(names.people),
+    pointsOfInterest: normalizeColorNameMap(names.pointsOfInterest),
+    locations: normalizeColorNameMap(names.locations),
+  }
+}
+
+function normalizeColorNameMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') {
+    return {}
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'
+    )
+  )
 }
 
 function sortReferences(references: Set<string>): string[] {

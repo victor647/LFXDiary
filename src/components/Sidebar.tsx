@@ -29,8 +29,10 @@ type SidebarContextMenu = {
 }
 
 type SidebarSyncTarget =
+  | { kind: 'entry'; key: string; notebookKey: string }
   | { kind: 'month'; key: string }
   | { kind: 'year'; year: string }
+  | { kind: 'decade'; decade: string }
 
 const tagKindOptions: Array<{ label: string; value: TagFilterKind; title: string }> = [
   { label: 'Locations', value: 'location', title: 'Add location filter' },
@@ -62,6 +64,7 @@ type SidebarProps = {
   onImportEvernoteFiles: (files: File[]) => void
   onSync: () => void
   onPull: () => void
+  onForcePull: () => void
   onOpenCatalog: () => void
   onOpenSettings: () => void
   onSearchChange: (query: string) => void
@@ -101,6 +104,7 @@ export function Sidebar({
   onImportEvernoteFiles,
   onSync,
   onPull,
+  onForcePull,
   onOpenCatalog,
   onOpenSettings,
   onSearchChange,
@@ -395,11 +399,12 @@ export function Sidebar({
         </div>
         {decadeGroups.map((decadeGroup) => {
           const isDecadeExpanded = expandedDecades.has(decadeGroup.decade)
+          const isSelectedDecade = syncTarget.kind === 'decade' && syncTarget.decade === decadeGroup.decade
 
           return (
             <div className="decade-group" key={decadeGroup.decade}>
               <button
-                className="decade-toggle"
+                className={isSelectedDecade ? 'decade-toggle selected' : 'decade-toggle'}
                 type="button"
                 onClick={() => onToggleDecade(decadeGroup.decade)}
               >
@@ -508,7 +513,15 @@ export function Sidebar({
       )}
 
       <div className="sync-panel">
-        <button type="button" onClick={onPull} title="Pull Markdown entries from the sync provider">
+        <button
+          type="button"
+          onClick={onPull}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            onForcePull()
+          }}
+          title="Pull Markdown entries from the sync provider (right-click for Force Pull)"
+        >
           <Download size={18} />
           Pull
         </button>

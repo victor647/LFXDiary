@@ -24,3 +24,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.codemap/
+.codemaker/codemap/
+.codemaker/codeindex/
+.agents/skills/codemap-*/
+.agents/skills/code-index-*/

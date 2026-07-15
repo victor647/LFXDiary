@@ -6,9 +6,10 @@ type SyncProgressDialogProps = {
   title?: string
   current?: number
   total?: number
+  logLines?: string[]
 }
 
-export function SyncProgressDialog({ message, target, title, current, total }: SyncProgressDialogProps) {
+export function SyncProgressDialog({ message, target, title, current, total, logLines }: SyncProgressDialogProps) {
   const hasProgress = typeof current === 'number' && typeof total === 'number' && total > 0
   const progressPercent = hasProgress ? Math.min(100, Math.max(0, (current / total) * 100)) : 0
 
@@ -20,7 +21,13 @@ export function SyncProgressDialog({ message, target, title, current, total }: S
         </div>
         <div className="sync-progress-copy" aria-live="polite">
           <div className="compact-title">{title ?? `Syncing ${target}`}</div>
-          <p>{message}</p>
+          {logLines && logLines.length > 0 && (
+            <div className="sync-progress-log">
+              {logLines.map((line, i) => (
+                <p key={i} className="sync-progress-log-line">{line}</p>
+              ))}
+            </div>
+          )}
           {hasProgress && (
             <div className="sync-progress-meter" aria-label={`Progress ${current} of ${total}`}>
               <div className="sync-progress-count">{current}/{total}</div>
@@ -29,6 +36,7 @@ export function SyncProgressDialog({ message, target, title, current, total }: S
               </div>
             </div>
           )}
+          {!hasProgress && <p>{message}</p>}
         </div>
       </div>
     </div>
