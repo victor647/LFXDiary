@@ -4,6 +4,7 @@ import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
 import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
 
 export type PersonMentionOption = {
+  id: string
   name: string
   color: string
 }
@@ -54,8 +55,14 @@ export function EntryEditor({
 
     return peopleOptions
       .filter((person) => !query || person.name.toLowerCase().includes(query))
-      .slice(0, 8)
-  }, [mentionState, peopleOptions])
+      .sort((a, b) => {
+        // Prioritize people already on the current entry
+        const aInDraft = people.includes(a.id)
+        const bInDraft = people.includes(b.id)
+        if (aInDraft !== bInDraft) return aInDraft ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+  }, [mentionState, peopleOptions, people])
   const mentionColorGroups = useMemo(() => {
     const groups = new Map<string, PersonMentionOption[]>()
 
@@ -135,10 +142,11 @@ export function EntryEditor({
     if (!mentionState)
       return
 
+    const guidRef = `@[${person.id}]`
     const nextCharacter = content[mentionState.end] ?? ''
     const suffix = nextCharacter && !/\s/.test(nextCharacter) ? ' ' : ''
-    const nextContent = `${content.slice(0, mentionState.start)}${person.name}${suffix}${content.slice(mentionState.end)}`
-    const nextCaret = mentionState.start + person.name.length + suffix.length
+    const nextContent = `${content.slice(0, mentionState.start)}${guidRef}${suffix}${content.slice(mentionState.end)}`
+    const nextCaret = mentionState.start + guidRef.length + suffix.length
 
     onPersonMention(person, nextContent)
     setMentionState(null)
@@ -147,6 +155,12 @@ export function EntryEditor({
       textareaRef.current?.setSelectionRange(nextCaret, nextCaret)
     })
   }
+
+  const tagDisplayNames = useMemo(() => {
+    const names: Record<string, string> = {}
+    for (const p of peopleOptions) names[p.id] = p.name
+    return names
+  }, [peopleOptions])
 
   return (
     <section className="entry-body">
@@ -159,6 +173,7 @@ export function EntryEditor({
             personColors={personColors}
             pointsOfInterest={pointsOfInterest}
             pointOfInterestColors={pointOfInterestColors}
+            tagDisplayNames={tagDisplayNames}
           />
         </div>
         <textarea
@@ -301,12 +316,14 @@ function RichTextContent({
   personColors,
   pointsOfInterest,
   pointOfInterestColors,
+  tagDisplayNames,
 }: {
   content: string
   people: string[]
   personColors: Record<string, string>
   pointsOfInterest: string[]
   pointOfInterestColors: Record<string, string>
+  tagDisplayNames?: Record<string, string>
 }) {
   const tokens = tokenizeRichTextTags(content, people, pointsOfInterest)
 
@@ -317,20 +334,21 @@ function RichTextContent({
           return <span key={index}>{token.value}</span>
 
         const color = token.kind === 'person'
-          ? personColors[token.value] ?? DEFAULT_TAG_COLOR
-          : pointOfInterestColors[token.value] ?? DEFAULT_TAG_COLOR
+          ? personColors[token.tagId] ?? DEFAULT_TAG_COLOR
+          : pointOfInterestColors[token.tagId] ?? DEFAULT_TAG_COLOR
+        const displayName = tagDisplayNames?.[token.tagId] ?? token.tagId
 
         return (
           <span
             className="entry-person-token"
-            key={`${token.value}-${index}`}
+            key={`${token.tagId}-${index}`}
             style={{
               backgroundColor: getTagBackgroundColor(color),
               boxShadow: `0 0 0 1px ${color} inset`,
               color: getTagTextColor(color),
             }}
           >
-            {token.value}
+            {displayName}
           </span>
         )
       })}
@@ -340,60 +358,42 @@ function RichTextContent({
 
 type RichTextToken = {
   kind: 'text' | 'person' | 'pointOfInterest'
-  value: string
-}
-
-type RichTextTagMatch = {
-  kind: 'person' | 'pointOfInterest'
+  tagId: string
   value: string
 }
 
 function tokenizeRichTextTags(content: string, people: string[], pointsOfInterest: string[]): RichTextToken[] {
-  const tags = [
-    ...Array.from(new Set(people.filter(Boolean))).map((value) => ({ kind: 'person' as const, value })),
-    ...Array.from(new Set(pointsOfInterest.filter(Boolean))).map((value) => ({ kind: 'pointOfInterest' as const, value })),
-  ].sort((a, b) => b.value.length - a.value.length || getRichTextTagPriority(a.kind) - getRichTextTagPriority(b.kind))
+  const personIds = new Set(people.filter(Boolean))
+  const poiIds = new Set(pointsOfInterest.filter(Boolean))
+
+  // Parse @[uuid] patterns from content
+  const pattern = /@\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi
   const tokens: RichTextToken[] = []
   let index = 0
+  let match: RegExpExecArray | null
 
-  while (index < content.length) {
-    const match = findNextRichTextTagMatch(content, tags, index)
+  while ((match = pattern.exec(content)) !== null) {
+    const guid = match[1]
+    const matchIndex = match.index
 
-    if (!match) {
-      tokens.push({ kind: 'text', value: content.slice(index) })
-      break
+    // Text before this match
+    if (matchIndex > index) {
+      tokens.push({ kind: 'text', tagId: '', value: content.slice(index, matchIndex) })
     }
 
-    if (match.start > index)
-      tokens.push({ kind: 'text', value: content.slice(index, match.start) })
+    // Determine kind: prefer person if in both sets
+    const kind: 'person' | 'pointOfInterest' = poiIds.has(guid) && !personIds.has(guid)
+      ? 'pointOfInterest'
+      : 'person'
+    tokens.push({ kind, tagId: guid, value: guid })
 
-    tokens.push({ kind: match.tag.kind, value: match.tag.value })
-    index = match.start + match.tag.value.length
+    index = matchIndex + match[0].length
   }
 
-  return tokens.length ? tokens : [{ kind: 'text', value: content }]
-}
-
-function findNextRichTextTagMatch(
-  content: string,
-  tags: RichTextTagMatch[],
-  startIndex: number,
-): { tag: RichTextTagMatch; start: number } | null {
-  let bestMatch: { tag: RichTextTagMatch; start: number } | null = null
-
-  for (const tag of tags) {
-    const matchIndex = content.indexOf(tag.value, startIndex)
-
-    if (matchIndex === -1)
-      continue
-
-    if (!bestMatch || matchIndex < bestMatch.start || (matchIndex === bestMatch.start && tag.value.length > bestMatch.tag.value.length))
-      bestMatch = { tag, start: matchIndex }
+  // Remaining text after last match
+  if (index < content.length) {
+    tokens.push({ kind: 'text', tagId: '', value: content.slice(index) })
   }
 
-  return bestMatch
-}
-
-function getRichTextTagPriority(kind: RichTextTagMatch['kind']): number {
-  return kind === 'person' ? 0 : 1
+  return tokens
 }

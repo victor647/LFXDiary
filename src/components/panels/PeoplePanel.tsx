@@ -1,6 +1,6 @@
 import { Users } from 'lucide-react'
 import { DEFAULT_TAG_COLOR, MAX_PEOPLE_PER_ENTRY } from '../../domain/constants'
-import type { AppSettings, DiaryEntry } from '../../domain/types'
+import type { AppSettings, DiaryCatalog, DiaryEntry } from '../../domain/types'
 import { personTagManager } from '../../domain/tagModels'
 import { analyzePeopleFromContent } from '../../utils/evernoteImport'
 import { EntryTagPanel } from './EntryTagPanel'
@@ -9,6 +9,8 @@ type PeoplePanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  diaryCatalog?: DiaryCatalog
+  onNavigateDate?: (date: string) => void
   onSettingsChange: (settings: AppSettings) => void
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
@@ -34,7 +36,7 @@ export function PeoplePanel(props: PeoplePanelProps) {
     }
 
     for (const person of result.addedPeople)
-      peopleTags[person] ??= { color: DEFAULT_TAG_COLOR }
+      peopleTags[person] ??= { name: person, color: DEFAULT_TAG_COLOR }
 
     props.onSettingsChange({ ...props.settings, peopleTags })
     props.onUpdateDraft({ people, personColors })

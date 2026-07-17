@@ -1,6 +1,7 @@
 import type { ActivityTag, CatalogDiaryTagManager, PersonTag, PointOfInterestTag } from '../domain/tagModels'
-import { updateDiaryCatalogLocationCity, updateDiaryCatalogLocationPin } from '../domain/diaryCatalog'
-import type { AppSettings, City, DiaryCatalog, DiaryEntry } from '../domain/types'
+import { ActivityTagManager, PersonTagManager, PointOfInterestTagManager } from '../domain/tagModels'
+import { moveDiaryCatalogNamedTag, updateDiaryCatalogLocationCity, updateDiaryCatalogLocationPin, updateDiaryCatalogNamedTagSection } from '../domain/diaryCatalog'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, TagId } from '../domain/types'
 import {
   mergeEntryLocationCity,
   mergeEntryLocations,
@@ -21,42 +22,52 @@ export type TagEvent =
   | {
     type: 'catalog-tag-added'
     manager: CatalogTagManager
-    tag: string
+    tagId: TagId
+    name: string
     color: string
   }
   | {
     type: 'catalog-tag-updated'
     manager: CatalogTagManager
-    oldTag: string
-    nextTag: string
+    oldTag: TagId
+    nextTag: TagId
+    name: string
     color: string
   }
   | {
     type: 'catalog-tags-deleted'
     manager: CatalogTagManager
-    tags: string[]
+    tagIds: TagId[]
   }
   | {
     type: 'catalog-tag-pin-updated'
     manager: CatalogTagManager
-    tag: string
+    tagId: TagId
     pinned: boolean
+  }
+  | {
+    type: 'catalog-tag-moved'
+    sourceManager: CatalogTagManager
+    targetManager: CatalogTagManager
+    tagId: TagId
+    color: string
   }
   | {
     type: 'entry-tag-added'
     manager: CatalogTagManager
-    tag: string
+    tagId: TagId
+    name: string
     color: string
   }
   | {
     type: 'entry-tags-deleted'
     manager: CatalogTagManager
-    tags: string[]
+    tagIds: TagId[]
   }
   | {
     type: 'entry-tags-reordered'
     manager: CatalogTagManager
-    tags: string[]
+    tagIds: TagId[]
   }
   | {
     type: 'location-tag-updated'
@@ -106,19 +117,27 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
       ...state,
       settings: event.manager.setCatalog(state.settings, {
         ...event.manager.getCatalog(state.settings),
-        [event.tag]: { color: event.color },
+        [event.tagId]: { name: event.name, color: event.color },
       }),
     }
   }
 
   if (event.type === 'catalog-tag-updated') {
-    return {
+    const nextState = {
       ...state,
       settings: event.manager.setCatalog(
         state.settings,
         event.manager.updateCatalog(event.manager.getCatalog(state.settings), event.oldTag, event.nextTag, event.color),
       ),
     }
+
+    if (nextState.diaryCatalog) {
+      nextState.diaryCatalog = updateDiaryCatalogSection(
+        nextState.diaryCatalog, event.manager, event.oldTag, event.nextTag, event.color,
+      )
+    }
+
+    return nextState
   }
 
   if (event.type === 'catalog-tags-deleted') {
@@ -126,7 +145,7 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
       ...state,
       settings: event.manager.setCatalog(
         state.settings,
-        event.manager.deleteCatalogTags(event.manager.getCatalog(state.settings), event.tags),
+        event.manager.deleteCatalogTags(event.manager.getCatalog(state.settings), event.tagIds),
       ),
     }
   }
@@ -136,9 +155,33 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
       ...state,
       settings: event.manager.setCatalog(
         state.settings,
-        event.manager.updateCatalogPin(event.manager.getCatalog(state.settings), event.tag, event.pinned),
+        event.manager.updateCatalogPin(event.manager.getCatalog(state.settings), event.tagId, event.pinned),
       ),
     }
+  }
+
+  if (event.type === 'catalog-tag-moved') {
+    const nextState = {
+      ...state,
+      settings: event.targetManager.setCatalog(
+        event.sourceManager.setCatalog(
+          state.settings,
+          event.sourceManager.deleteCatalogTags(event.sourceManager.getCatalog(state.settings), [event.tagId]),
+        ),
+        {
+          ...event.targetManager.getCatalog(state.settings),
+          [event.tagId]: { name: event.targetManager.getCatalog(state.settings)[event.tagId]?.name ?? event.tagId, color: event.color },
+        },
+      ),
+    }
+
+    if (nextState.diaryCatalog) {
+      nextState.diaryCatalog = moveDiaryCatalogBetweenSections(
+        nextState.diaryCatalog, event.sourceManager, event.targetManager, event.tagId, event.color,
+      )
+    }
+
+    return nextState
   }
 
   return state
@@ -146,7 +189,7 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
 
 function catalogEntryReferenceObserver(event: TagEvent, state: TagEventState): TagEventState {
   if (event.type === 'catalog-tag-updated') {
-    if (event.manager.normalizeName(event.oldTag) === event.manager.normalizeName(event.nextTag))
+    if (event.oldTag === event.nextTag)
       return state
 
     return updateEntriesAndDraft(state, (entry) => {
@@ -156,7 +199,21 @@ function catalogEntryReferenceObserver(event: TagEvent, state: TagEventState): T
 
   if (event.type === 'catalog-tags-deleted') {
     return updateEntriesAndDraft(state, (entry) => {
-      return event.tags.reduce((nextEntry, tag) => event.manager.deleteEntryTag(nextEntry, tag), entry)
+      return event.tagIds.reduce((nextEntry, tagId) => event.manager.deleteEntryTag(nextEntry, tagId), entry)
+    })
+  }
+
+  if (event.type === 'catalog-tag-moved') {
+    return updateEntriesAndDraft(state, (entry) => {
+      const afterDelete = event.sourceManager.deleteEntryTag(entry, event.tagId)
+      const patch = event.targetManager.addToEntry(afterDelete, event.tagId, event.color)
+      if (!patch) return afterDelete
+      return {
+        ...afterDelete,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+        isEdited: true,
+      }
     })
   }
 
@@ -165,7 +222,7 @@ function catalogEntryReferenceObserver(event: TagEvent, state: TagEventState): T
 
 function currentEntryTagObserver(event: TagEvent, state: TagEventState): TagEventState {
   if (event.type === 'entry-tag-added') {
-    const patch = event.manager.addToEntry(state.draft, event.tag, event.color)
+    const patch = event.manager.addToEntry(state.draft, event.tagId, event.color)
 
     if (!patch)
       return state
@@ -180,7 +237,7 @@ function currentEntryTagObserver(event: TagEvent, state: TagEventState): TagEven
   }
 
   if (event.type === 'entry-tags-deleted') {
-    const nextDraft = event.tags.reduce((entry, tag) => event.manager.deleteEntryTag(entry, tag), state.draft)
+    const nextDraft = event.tagIds.reduce((entry, tagId) => event.manager.deleteEntryTag(entry, tagId), state.draft)
 
     if (nextDraft === state.draft)
       return state
@@ -192,7 +249,7 @@ function currentEntryTagObserver(event: TagEvent, state: TagEventState): TagEven
   }
 
   if (event.type === 'entry-tags-reordered') {
-    const patch = event.manager.buildDraftPatch(event.tags, event.manager.getEntryColors(state.draft))
+    const patch = event.manager.buildDraftPatch(event.tagIds, event.manager.getEntryColors(state.draft))
 
     return {
       ...state,
@@ -317,4 +374,70 @@ function getWeatherResetPatch(): Pick<DiaryEntry, 'weatherSamples' | 'dailyWeath
     dailyWeatherText: 'Not fetched',
     dailyPrecipitationMm: 0,
   }
+}
+
+function updateDiaryCatalogSection(
+  catalog: DiaryCatalog,
+  manager: CatalogTagManager,
+  oldTag: string,
+  nextTag: string,
+  color: string,
+): DiaryCatalog {
+  if (manager instanceof ActivityTagManager) {
+    return {
+      ...catalog,
+      activities: updateDiaryCatalogNamedTagSection(catalog.activities, oldTag, nextTag, color),
+    }
+  }
+
+  if (manager instanceof PersonTagManager) {
+    return {
+      ...catalog,
+      people: updateDiaryCatalogNamedTagSection(catalog.people, oldTag, nextTag, color),
+    }
+  }
+
+  if (manager instanceof PointOfInterestTagManager) {
+    return {
+      ...catalog,
+      pointsOfInterest: updateDiaryCatalogNamedTagSection(catalog.pointsOfInterest, oldTag, nextTag, color),
+    }
+  }
+
+  return catalog
+}
+
+function moveDiaryCatalogBetweenSections(
+  catalog: DiaryCatalog,
+  sourceManager: CatalogTagManager,
+  targetManager: CatalogTagManager,
+  tag: string,
+  color: string,
+): DiaryCatalog {
+  const sourceSection = getCatalogSection(catalog, sourceManager)
+  const targetSection = getCatalogSection(catalog, targetManager)
+  const result = moveDiaryCatalogNamedTag(sourceSection, targetSection, tag, color)
+
+  return setCatalogSection(setCatalogSection(catalog, sourceManager, result.sourceSection), targetManager, result.targetSection)
+}
+
+function getCatalogSection(
+  catalog: DiaryCatalog,
+  manager: CatalogTagManager,
+): DiaryCatalog['activities'] {
+  if (manager instanceof ActivityTagManager) return catalog.activities
+  if (manager instanceof PersonTagManager) return catalog.people
+  if (manager instanceof PointOfInterestTagManager) return catalog.pointsOfInterest
+  return {} as DiaryCatalog['activities']
+}
+
+function setCatalogSection(
+  catalog: DiaryCatalog,
+  manager: CatalogTagManager,
+  section: DiaryCatalog['activities'],
+): DiaryCatalog {
+  if (manager instanceof ActivityTagManager) return { ...catalog, activities: section }
+  if (manager instanceof PersonTagManager) return { ...catalog, people: section }
+  if (manager instanceof PointOfInterestTagManager) return { ...catalog, pointsOfInterest: section }
+  return catalog
 }

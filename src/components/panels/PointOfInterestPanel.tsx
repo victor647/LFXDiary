@@ -1,7 +1,7 @@
 import { Star } from 'lucide-react'
 import { DEFAULT_TAG_COLOR, MAX_POINTS_OF_INTEREST_PER_ENTRY } from '../../domain/constants'
 import { pointOfInterestTagManager } from '../../domain/tagModels'
-import type { AppSettings, DiaryEntry } from '../../domain/types'
+import type { AppSettings, DiaryCatalog, DiaryEntry } from '../../domain/types'
 import { analyzePointsOfInterestFromContent } from '../../utils/evernoteImport'
 import { EntryTagPanel } from './EntryTagPanel'
 
@@ -9,6 +9,8 @@ type PointOfInterestPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  diaryCatalog?: DiaryCatalog
+  onNavigateDate?: (date: string) => void
   onSettingsChange: (settings: AppSettings) => void
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
@@ -35,7 +37,7 @@ export function PointOfInterestPanel(props: PointOfInterestPanelProps) {
     }
 
     for (const pointOfInterest of result.addedPointsOfInterest)
-      pointOfInterestTags[pointOfInterest] ??= { color: DEFAULT_TAG_COLOR }
+      pointOfInterestTags[pointOfInterest] ??= { name: pointOfInterest, color: DEFAULT_TAG_COLOR }
 
     props.onSettingsChange({ ...props.settings, pointOfInterestTags })
     props.onUpdateDraft({ pointsOfInterest, pointOfInterestColors })

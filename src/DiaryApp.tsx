@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DeleteEntryDialog } from './components/DeleteEntryDialog'
-import { EntryEditor } from './components/EntryEditor'
+import { EntryEditor, type PersonMentionOption } from './components/EntryEditor'
 import { ForcePushDialog } from './components/ForcePushDialog'
 import { MetadataEditor } from './components/MetadataEditor'
 import { PullConflictDialog } from './components/PullConflictDialog'
@@ -53,12 +53,12 @@ import {
   upsertEntry,
 } from './utils/entries'
 import { downloadTextFile, getEntryMarkdownFileName } from './utils/files'
-import { getSettingsPersonColor, getSettingsPointOfInterestColor, loadSettings, normalizeSettings, saveSettings } from './utils/settings'
+import { loadSettings, normalizeSettings, repairSettingsTagNames, cleanupBrokenCatalogTags, saveSettings } from './utils/settings'
 import { formatSyncErrorLog } from './utils/syncErrorLog'
-import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag } from './utils/tags'
 import { getDecadeKey, getFilteredMonthEntryCounts, getTagFilterEntryReferences, getTagFilterOptions, sumMonthEntryCounts } from './utils/diaryFilterHelpers'
 import { getSyncTargetEntries, getSyncTargetLabel, getSyncTargetNotebookKeys, getSyncTargetPullSource } from './utils/syncTargetHelpers'
 import { importEvernoteFiles } from './application/importOperations'
+import { restoreFromFiles } from './utils/storage'
 
 export function DiaryApp() {
   const [currentPage, setCurrentPage] = useState<'diary' | 'settings' | 'catalog'>('diary')
@@ -117,14 +117,34 @@ export function DiaryApp() {
   const unuploadedEntryCount = useMemo(() => getUnuploadedEntryCount(entries, draft), [draft, entries])
   const richTextTags = useMemo(() => {
     const p = new Set<string>(); const pc: Record<string, string> = {}; const pi = new Set<string>(); const pic: Record<string, string> = {}
-    for (const r of draft.people ?? []) { const n = normalizePersonTag(r); if (!n) continue; const c = getSettingsPersonColor(settings, n) ?? draft.personColors?.[n]; p.add(n); if (c) pc[n] = c }
-    for (const r of draft.pointsOfInterest ?? []) { const n = normalizePointOfInterestTag(r); if (!n) continue; const c = getSettingsPointOfInterestColor(settings, n) ?? draft.pointOfInterestColors?.[n]; pi.add(n); if (c) pic[n] = c }
+    for (const id of draft.people ?? []) { if (!id) continue; const c = draft.personColors?.[id] ?? settings.peopleTags[id]?.color; p.add(id); if (c) pc[id] = c }
+    for (const id of draft.pointsOfInterest ?? []) { if (!id) continue; const c = draft.pointOfInterestColors?.[id] ?? settings.pointOfInterestTags[id]?.color; pi.add(id); if (c) pic[id] = c }
     return { people: Array.from(p), personColors: pc, pointsOfInterest: Array.from(pi), pointOfInterestColors: pic }
   }, [draft.people, draft.personColors, draft.pointOfInterestColors, draft.pointsOfInterest, settings])
   const peopleMentionOptions = useMemo(() => getPeopleMentionOptions(settings, diaryCatalog, draft), [diaryCatalog, draft, settings])
   const hasUnsavedEntries = isDraftDirty || unsavedEntryIds.size > 0
   const closeUnsavedCount = hasUnsavedEntries ? Math.max(1, unsavedEntryIds.size) : 0
   const sidebarStatusMessage = getSidebarStatusMessage(unsavedEntryIds.size, unuploadedEntryCount) ?? statusMessage
+
+  // Restore data from files on startup in Electron
+  useEffect(() => { restoreFromFiles() }, [])
+
+  // Repair tag names if they were corrupted to GUIDs (one-time fix)
+  const tagNamesRepaired = useRef(false)
+  useEffect(() => {
+    if (tagNamesRepaired.current || !diaryCatalog) return
+    const repaired = repairSettingsTagNames(settings, diaryCatalog)
+    const cleanedCatalog = cleanupBrokenCatalogTags(diaryCatalog)
+    if (repaired !== settings) {
+      setSettings(repaired)
+      saveSettings(repaired)
+    }
+    if (cleanedCatalog !== diaryCatalog) {
+      setDiaryCatalog(cleanedCatalog)
+      saveStoredDiaryCatalog(cleanedCatalog)
+    }
+    tagNamesRepaired.current = true
+  }, [diaryCatalog, settings])
 
   useEffect(() => { setDraft((current) => syncEntryRichTextTagColors(current, settings)) }, [draft.id, settings])
   useEffect(() => { hasUnsavedEntriesRef.current = hasUnsavedEntries }, [hasUnsavedEntries])
@@ -163,6 +183,22 @@ export function DiaryApp() {
     setDraft((c) => { const rd = typeof nextDraft === 'function' ? nextDraft(c) : nextDraft; setDiaryCatalog((cc) => { const nc = syncDiaryCatalogEntry(cc, rd); if (entries.some((e) => e.id === rd.id)) saveStoredDiaryCatalog(nc); return nc }); return rd })
   }
   function applyDiaryCatalog(nextCatalog: DiaryCatalog) { setDiaryCatalog(nextCatalog); saveStoredDiaryCatalog(nextCatalog) }
+  function navigateToDate(date: string) {
+    const notebookKey = getNotebookKey(date)
+    // Load month if not already loaded
+    if (!loadedMonthKeys.has(notebookKey)) {
+      const nextLoadedMonthKeys = new Set([...loadedMonthKeys, notebookKey])
+      const monthEntries = loadNotebookEntries(notebookKey)
+      setLoadedMonthKeys(nextLoadedMonthKeys)
+      applyEntries((current) => upsertEntries(current, monthEntries), nextLoadedMonthKeys)
+    }
+    // Find entry and navigate
+    const entry = entries.find((e) => e.diaryDate === date) ?? loadNotebookEntries(notebookKey).find((e) => e.diaryDate === date)
+    if (entry) {
+      selectEntry(entry, notebookKey)
+      setCurrentPage('diary')
+    }
+  }
   function loadMonthIfNeeded(monthKey: string): Set<string> {
     if (loadedMonthKeys.has(monthKey)) return loadedMonthKeys
     const nextLoadedMonthKeys = new Set([...loadedMonthKeys, monthKey])
@@ -176,10 +212,10 @@ export function DiaryApp() {
   function updateDraftIfCurrent(entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) {
     applyDraft((current) => current.id !== entryId || current.diaryDate !== diaryDate ? current : { ...current, ...patch, updatedAt: new Date().toISOString(), isEdited: true })
   }
-  function mentionPerson(person: { name: string; color: string }, content: string) {
-    const normalizedPerson = normalizePersonTag(person.name)
-    if (!normalizedPerson) { updateDraft({ content }); return }
-    updateDraft({ content, people: normalizePersonTags([...draft.people, normalizedPerson]).slice(0, MAX_PEOPLE_PER_ENTRY), personColors: { ...draft.personColors, [normalizedPerson]: person.color || DEFAULT_TAG_COLOR } })
+  function mentionPerson(person: PersonMentionOption, content: string) {
+    const personId = person.id
+    if (!personId) { updateDraft({ content }); return }
+    updateDraft({ content, people: [...new Set([...draft.people, personId])].slice(0, MAX_PEOPLE_PER_ENTRY), personColors: { ...draft.personColors, [personId]: person.color || DEFAULT_TAG_COLOR } })
   }
 
   function getNavigationSaveState(): { savedDraft: DiaryEntry; localEntries: DiaryEntry[]; didSave: boolean } {
@@ -439,10 +475,35 @@ export function DiaryApp() {
       const ns = normalizeSettings(settings); const adapter = await getDiarySyncAdapter(ns); const sl = adapter.label
       setStatusMessage(`Pulling catalog from ${sl}...`); const rc = await adapter.pullCatalog(ns)
       if (!rc) { setStatusMessage(`No catalog found on ${sl}.`); return }
-      const mc = mergeDiaryCatalogs(rc, diaryCatalog); const next = applyDiaryCatalogToSettings(ns, mc)
-      setSettings(next); saveSettings(next); applyDiaryCatalog(mc)
-      setStatusMessage(`Catalog pulled from ${sl}. Click Save Catalog to persist.`)
+
+      // Count tags before conversion (rc might be v1 or v2)
+      const remoteCount = countCatalogTags(rc)
+      const localCount = countCatalogTags(diaryCatalog)
+
+      // Ask user: merge or override?
+      const choice = window.confirm(
+        `Catalog pulled from ${sl}.\n\n` +
+        `Remote: ${remoteCount} tags\n` +
+        `Local:  ${localCount} tags\n\n` +
+        `Click OK to MERGE (combine both), or Cancel to OVERRIDE (replace local with remote).`
+      )
+
+      // mergeDiaryCatalogs converts v1→v2 automatically, generating GUIDs for name-based tags
+      const nextCatalog = mergeDiaryCatalogs(
+        choice ? diaryCatalog : { ...diaryCatalog, activities: {}, people: {}, pointsOfInterest: {} },
+        rc,
+      )
+      setStatusMessage(choice
+        ? `Catalog merged from ${sl}. Click Save Catalog to persist.`
+        : `Local catalog replaced with remote from ${sl}. Click Save Catalog to persist.`)
+
+      const next = applyDiaryCatalogToSettings(ns, nextCatalog)
+      setSettings(next); saveSettings(next); applyDiaryCatalog(nextCatalog)
     } catch (error) { setStatusMessage(error instanceof Error ? `Catalog pull failed: ${error.message}` : 'Catalog pull failed.') }
+  }
+
+  function countCatalogTags(catalog: DiaryCatalog): number {
+    return Object.keys(catalog.activities).length + Object.keys(catalog.people).length + Object.keys(catalog.pointsOfInterest).length
   }
 
   return (
@@ -467,12 +528,13 @@ export function DiaryApp() {
             onEntriesChange={applyEntries} onStatusChange={setStatusMessage}
             onSave={currentPage === 'catalog' ? persistCatalog : persistSettings}
             onExportCatalog={exportCatalogFile} onImportCatalog={(f) => { void importCatalogFile(f) }}
-            onPullCatalog={() => { void pullCatalogFromProvider() }} onBack={() => setCurrentPage('diary')} />
+            onPullCatalog={() => { void pullCatalogFromProvider() }} onNavigateDate={navigateToDate} onBack={() => setCurrentPage('diary')} />
         ) : (
           <>
             <MetadataEditor draft={draft} entries={entries} diaryCatalog={diaryCatalog} settings={settings}
               onSettingsChange={setSettings} onUpdateDraft={updateDraft} onUpdateDraftIfCurrent={updateDraftIfCurrent}
-              onDraftChange={applyDraft} onEntriesChange={applyEntries} onStatusChange={setStatusMessage} onErrorLog={setSyncErrorLog} />
+              onDraftChange={applyDraft} onEntriesChange={applyEntries} onStatusChange={setStatusMessage} onErrorLog={setSyncErrorLog}
+              onNavigateDate={navigateToDate} />
             <EntryEditor content={draft.content} people={richTextTags.people} peopleOptions={peopleMentionOptions}
               personColorGroupNames={settings.personColorGroupNames} personColors={richTextTags.personColors}
               pointsOfInterest={richTextTags.pointsOfInterest} pointOfInterestColors={richTextTags.pointOfInterestColors}

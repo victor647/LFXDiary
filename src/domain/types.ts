@@ -1,3 +1,5 @@
+export type TagId = string
+
 export type Period = 'morning' | 'afternoon' | 'evening'
 
 export type City = {
@@ -40,12 +42,18 @@ export type DiaryEntry = {
   dailyPrecipitationMm: number
   weatherSamples: WeatherSample[]
   mood: MoodScore
-  tags: string[]
-  tagColors: Record<string, string>
-  people: string[]
-  personColors: Record<string, string>
-  pointsOfInterest: string[]
-  pointOfInterestColors: Record<string, string>
+  /** GUIDs referencing activity tags */
+  tags: TagId[]
+  /** GUID → color for activity tags */
+  tagColors: Record<TagId, string>
+  /** GUIDs referencing person tags */
+  people: TagId[]
+  /** GUID → color for person tags */
+  personColors: Record<TagId, string>
+  /** GUIDs referencing point-of-interest tags */
+  pointsOfInterest: TagId[]
+  /** GUID → color for POI tags */
+  pointOfInterestColors: Record<TagId, string>
   content: string
   createdAt: string
   updatedAt: string
@@ -70,6 +78,7 @@ export type NotebookGroup = {
 }
 
 export type RecentTag = {
+  id: TagId
   name: string
   color: string
   pinned?: boolean
@@ -117,26 +126,33 @@ export type AppSettings = {
   aliyunAirAppKey: string
   aliyunAirAppSecret: string
   activityColorGroupNames: Record<string, string>
-  activityTags: Record<string, {
+  /** GUID → tag metadata for activity tags */
+  activityTags: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
   }>
   personColorGroupNames: Record<string, string>
-  peopleTags: Record<string, {
+  /** GUID → tag metadata for person tags */
+  peopleTags: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
   }>
   pointOfInterestColorGroupNames: Record<string, string>
-  pointOfInterestTags: Record<string, {
+  /** GUID → tag metadata for point-of-interest tags */
+  pointOfInterestTags: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
   }>
   locationColorGroupNames: Record<string, string>
   temperatureThresholds: TemperatureThresholds
+  dataFolder?: string
 }
 
 export type DiaryCatalog = {
-  version: 1
+  version: 2
   updatedAt: string
   locations: Record<string, {
     city: City
@@ -144,17 +160,23 @@ export type DiaryCatalog = {
     pinned?: boolean
     entries: string[]
   }>
-  activities: Record<string, {
+  /** GUID → tag metadata for activities */
+  activities: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
-  people: Record<string, {
+  /** GUID → tag metadata for people */
+  people: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
-  pointsOfInterest: Record<string, {
+  /** GUID → tag metadata for points of interest */
+  pointsOfInterest: Record<TagId, {
+    name: string
     color: string
     pinned?: boolean
     entries: string[]
@@ -169,19 +191,22 @@ export type DiaryCatalog = {
 }
 
 export type YearCatalog = {
-  version: 1
+  version: 2
   year: string
   locations: Record<string, string[]>
-  activities: Record<string, string[]>
-  people: Record<string, string[]>
-  pointsOfInterest: Record<string, string[]>
+  /** GUID → entry references for activities */
+  activities: Record<TagId, string[]>
+  /** GUID → entry references for people */
+  people: Record<TagId, string[]>
+  /** GUID → entry references for points of interest */
+  pointsOfInterest: Record<TagId, string[]>
 }
 
 export type TagFilterKind = 'location' | 'activity' | 'person' | 'pointOfInterest'
 
 export type TagFilterSelection = {
   kind: TagFilterKind
-  tag: string
+  tag: TagId
 }
 
 export type TagFilter = {
@@ -193,7 +218,7 @@ export type TagFilter = {
 
 export type TagFilterOption = {
   kind: TagFilterKind
-  value: string
+  value: TagId
   name: string
   color: string
   colorLabel: string

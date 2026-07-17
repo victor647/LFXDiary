@@ -4,24 +4,28 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../../application/tagEvents'
 import { createPortal } from 'react-dom'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../../domain/constants'
-import type { AppSettings, DiaryEntry } from '../../domain/types'
+import type { AppSettings, DiaryCatalog, DiaryEntry } from '../../domain/types'
 import { reorderByKey } from '../../utils/reorder'
 import {
   ActivityAddButton,
   ActivityAddDialog,
   ActivityChipButton,
   ActivityEditDialog,
+  TagContextMenu,
 } from '../ActivityTagControls'
+import type { ContextMenuItem } from '../ActivityTagControls'
 
 type EntryTagPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
+  diaryCatalog?: DiaryCatalog
   clearActionLabel?: string
   getClearableTags?: (tags: string[], draft: DiaryEntry) => string[]
   icon: ReactNode
   manager: CatalogTagManager
   onAutoAnalyze?: () => void
+  onNavigateDate?: (date: string) => void
   onSettingsChange: (settings: AppSettings) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
@@ -41,17 +45,20 @@ export function EntryTagPanel({
   draft,
   entries,
   settings,
+  diaryCatalog,
   clearActionLabel,
   getClearableTags,
   icon,
   manager,
   onAutoAnalyze,
+  onNavigateDate,
   onSettingsChange,
   onDraftChange,
   onEntriesChange,
   onStatusChange,
 }: EntryTagPanelProps) {
   const [editingTagName, setEditingTagName] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(null)
   const [isTagAddOpen, setIsTagAddOpen] = useState(false)
   const [addingTagColor, setAddingTagColor] = useState<string | null>(null)
   const [expandedTagColor, setExpandedTagColor] = useState(DEFAULT_TAG_COLOR)
@@ -60,14 +67,14 @@ export function EntryTagPanel({
   const tagAddRef = useRef<HTMLSpanElement>(null)
   const tagPopoverRef = useRef<HTMLDivElement>(null)
   const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
-  const currentTags = manager.getEntryNames(draft)
+  const currentTags = manager.getEntryTagIds(draft)
   const currentColors = manager.getEntryColors(draft)
   const catalogTags = manager.getCatalog(settings)
   const clearableTags = clearActionLabel ? getClearableTags?.(currentTags, draft) ?? currentTags : []
   const colorNames = manager.getColorNames(settings)
   const availableRecentTags = useMemo(() => {
     return manager.collectRecent(entries, settings)
-      .filter((tag) => !currentTags.includes(tag.name))
+      .filter((tag) => !currentTags.includes(tag.key))
   }, [currentTags, entries, manager, settings])
   const tagColorGroups = useMemo(() => {
     const groups = new Map<string, typeof availableRecentTags>()
@@ -160,7 +167,8 @@ export function EntryTagPanel({
     applyTagEvent({
       type: 'entry-tag-added',
       manager,
-      tag,
+      tagId: tag,
+      name: rawTag,
       color,
     })
     setIsTagAddOpen(false)
@@ -176,7 +184,7 @@ export function EntryTagPanel({
     applyTagEvent({
       type: 'entry-tags-deleted',
       manager,
-      tags: [tag],
+      tagIds: [tag],
     })
   }
 
@@ -194,7 +202,7 @@ export function EntryTagPanel({
       return
 
     const duplicateTag = manager.collect(catalogEntries, settings).find((tag) => {
-      return manager.normalizeName(tag.name) === manager.normalizeName(nextTag) && manager.normalizeName(tag.name) !== manager.normalizeName(editingTagName)
+      return tag.key !== editingTagName && manager.normalizeName(tag.name) === nextTag
     })
 
     if (duplicateTag && !window.confirm(`${manager.itemLabel} "${nextTag}" already exists. Merge "${editingTagName}" into "${duplicateTag.name}"?`)) {
@@ -206,7 +214,8 @@ export function EntryTagPanel({
       type: 'catalog-tag-updated',
       manager,
       oldTag: editingTagName,
-      nextTag,
+      nextTag: duplicateTag?.key ?? editingTagName,
+      name: nextName,
       color,
     })
     closeTagEditor()
@@ -228,7 +237,7 @@ export function EntryTagPanel({
     applyTagEvent({
       type: 'entry-tags-deleted',
       manager,
-      tags: clearableTags,
+      tagIds: clearableTags,
     })
     onStatusChange(`Cleared ${manager.itemLabelPlural.toLowerCase()}.`)
   }
@@ -263,14 +272,33 @@ export function EntryTagPanel({
     applyTagEvent({
       type: 'entry-tags-reordered',
       manager,
-      tags: nextTags,
+      tagIds: nextTags,
     })
     setDraggingTagName(null)
     onStatusChange(`${manager.itemLabelPlural} order updated.`)
   }
 
-  function getCurrentTagColor(tag: string): string {
-    return catalogTags[manager.normalizeName(tag)]?.color ?? currentColors[tag] ?? DEFAULT_TAG_COLOR
+  function getCurrentTagColor(tagId: string): string {
+    return catalogTags[tagId]?.color ?? currentColors[tagId] ?? DEFAULT_TAG_COLOR
+  }
+
+  function getCurrentTagName(tagId: string): string {
+    return catalogTags[tagId]?.name ?? tagId
+  }
+
+  function handleTagContextMenu(tagId: string, event: React.MouseEvent) {
+    event.preventDefault()
+    event.stopPropagation()
+    const catalogEntry = diaryCatalog
+      ? diaryCatalog.activities[tagId] ?? diaryCatalog.people[tagId] ?? diaryCatalog.pointsOfInterest[tagId]
+      : undefined
+    const dates = catalogEntry?.entries ?? []
+
+    const items: ContextMenuItem[] = [
+      { kind: 'references', label: 'Show references', dates, onDateClick: (date) => onNavigateDate?.(date) },
+    ]
+
+    setContextMenu({ items, x: event.clientX, y: event.clientY })
   }
 
   return (
@@ -324,8 +352,9 @@ export function EntryTagPanel({
           >
             <ActivityChipButton
               color={getCurrentTagColor(tag)}
-              name={tag}
+              name={getCurrentTagName(tag)}
               onClick={() => setEditingTagName(tag)}
+              onContextMenu={(e) => handleTagContextMenu(tag, e)}
             />
           </span>
         ))}
@@ -397,11 +426,19 @@ export function EntryTagPanel({
         <ActivityEditDialog
           colorNames={colorNames}
           initialColor={getCurrentTagColor(editingTagName)}
-          initialName={editingTagName}
+          initialName={getCurrentTagName(editingTagName)}
           itemLabel={manager.itemLabel}
           onCancel={closeTagEditor}
           onDelete={deleteEditingTag}
           onSave={confirmTagEdit}
+        />
+      )}
+      {contextMenu && (
+        <TagContextMenu
+          items={contextMenu.items}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </div>

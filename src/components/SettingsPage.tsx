@@ -54,6 +54,7 @@ import {
   ActivityAddDialog,
   ActivityChipButton,
   ActivityEditDialog,
+  TagContextMenu,
 } from './ActivityTagControls'
 
 type SettingsPageProps = {
@@ -71,6 +72,7 @@ type SettingsPageProps = {
   onExportCatalog: () => void
   onImportCatalog: (file: File) => void
   onPullCatalog: () => void
+  onNavigateDate?: (date: string) => void
   onBack: () => void
 }
 
@@ -95,6 +97,7 @@ export function SettingsPage({
   onExportCatalog,
   onImportCatalog,
   onPullCatalog,
+  onNavigateDate,
   onBack,
 }: SettingsPageProps) {
   const isCatalogPage = variant === 'catalog'
@@ -136,6 +139,7 @@ export function SettingsPage({
   const [expandedPointOfInterestManagerColor, setExpandedPointOfInterestManagerColor] = useState<string | null>(null)
   const [editingLocationTag, setEditingLocationTag] = useState<LocationTagItem | null>(null)
   const [expandedLocationManagerColor, setExpandedLocationManagerColor] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ items: import('./ActivityTagControls').ContextMenuItem[]; x: number; y: number } | null>(null)
   const catalogImportInputRef = useRef<HTMLInputElement>(null)
 
   function applyTagEvent(event: TagEvent) {
@@ -322,6 +326,7 @@ export function SettingsPage({
       manager,
       oldTag,
       nextTag,
+      name: nextName,
       color,
     })
     clearEditingTag()
@@ -349,7 +354,8 @@ export function SettingsPage({
     applyTagEvent({
       type: 'catalog-tag-added',
       manager,
-      tag: nextTag,
+      tagId: nextTag,
+      name: rawTag,
       color,
     })
     closeDialog()
@@ -360,30 +366,76 @@ export function SettingsPage({
     applyTagEvent({
       type: 'catalog-tag-pin-updated',
       manager,
-      tag,
+      tagId: tag,
       pinned,
     })
     onStatusChange(`${pinned ? 'Pinned' : 'Unpinned'} ${manager.itemLabel.toLowerCase()}: ${tag}`)
+  }
+
+  function getMoveTargets(sourceManager: CatalogManager): CatalogManager[] {
+    const all: CatalogManager[] = [activityTagManager, personTagManager, pointOfInterestTagManager]
+    return all.filter((m) => m !== sourceManager)
+  }
+
+  function moveTag(sourceManager: CatalogManager, tagName: string, color: string, targetLabel: string) {
+    const targetManager = getMoveTargets(sourceManager).find((m) => m.itemLabelPlural === targetLabel)
+    if (!targetManager) return
+
+    if (!window.confirm(`Move "${tagName}" from ${sourceManager.itemLabelPlural} to ${targetManager.itemLabelPlural}?`)) {
+      return
+    }
+
+    applyTagEvent({
+      type: 'catalog-tag-moved',
+      sourceManager,
+      targetManager,
+      tagId: tagName,
+      color,
+    })
+    onStatusChange(`Moved ${sourceManager.itemLabel.toLowerCase()} "${tagName}" to ${targetManager.itemLabelPlural}`)
+  }
+
+  function getCatalogSectionForManager(manager: CatalogManager): DiaryCatalog['activities'] {
+    if (manager === activityTagManager) return diaryCatalog.activities
+    if (manager === personTagManager) return diaryCatalog.people
+    return diaryCatalog.pointsOfInterest
+  }
+
+  function handleTagContextMenu(tag: { key: string; name: string; color: string }, manager: CatalogManager, event: React.MouseEvent) {
+    event.preventDefault()
+    const section = getCatalogSectionForManager(manager)
+    const catalogEntry = section[tag.key]
+    const dates = catalogEntry?.entries ?? []
+
+    const items: import('./ActivityTagControls').ContextMenuItem[] = [
+      { kind: 'references' as const, label: 'Show references', dates, onDateClick: (date) => onNavigateDate?.(date) },
+      ...getMoveTargets(manager).map((target) => ({
+        kind: 'action' as const,
+        label: `Move to ${target.itemLabelPlural}`,
+        onClick: () => moveTag(manager, tag.key, tag.color, target.itemLabelPlural),
+      })),
+    ]
+
+    setContextMenu({ items, x: event.clientX, y: event.clientY })
   }
 
   function updateCatalogGroupName(manager: CatalogManager, color: string, name: string) {
     commitTagManagerSettings(manager.setColorGroupName(settings, color, name))
   }
 
-  function deleteCatalogTag(manager: CatalogManager, tag: string, clearEditingTag: () => void) {
-    const normalizedTag = manager.normalizeName(tag)
-    const usageCount = getManagerTags(manager).find((item) => manager.normalizeName(item.name) === normalizedTag)?.count ?? 0
+  function deleteCatalogTag(manager: CatalogManager, tagId: string, clearEditingTag: () => void) {
+    const usageCount = getManagerTags(manager).find((item) => item.key === tagId)?.count ?? 0
 
-    if (usageCount > 0 && !window.confirm(`Delete ${manager.itemLabel.toLowerCase()} "${tag}" from ${usageCount} ${usageCount === 1 ? 'entry' : 'entries'}?`))
+    if (usageCount > 0 && !window.confirm(`Delete ${manager.itemLabel.toLowerCase()} "${tagId}" from ${usageCount} ${usageCount === 1 ? 'entry' : 'entries'}?`))
       return
 
     applyTagEvent({
       type: 'catalog-tags-deleted',
       manager,
-      tags: [tag],
+      tagIds: [tagId],
     })
     clearEditingTag()
-    onStatusChange(`Deleted ${manager.itemLabel.toLowerCase()}: ${tag}`)
+    onStatusChange(`Deleted ${manager.itemLabel.toLowerCase()}.`)
   }
 
   function clearUnusedCatalogTags(
@@ -391,9 +443,9 @@ export function SettingsPage({
     editingTag: ActivityTagItem | PeopleTagItem | PointOfInterestTagItem | null,
     clearEditingTag: () => void,
   ) {
-    const unusedTags = getManagerTags(manager).filter((tag) => tag.count === 0).map((tag) => tag.name)
+    const unusedTagIds = getManagerTags(manager).filter((tag) => tag.count === 0).map((tag) => tag.key)
 
-    if (!unusedTags.length) {
+    if (!unusedTagIds.length) {
       onStatusChange(`No unused ${manager.itemLabel.toLowerCase()} tags.`)
       return
     }
@@ -401,13 +453,13 @@ export function SettingsPage({
     applyTagEvent({
       type: 'catalog-tags-deleted',
       manager,
-      tags: unusedTags,
+      tagIds: unusedTagIds,
     })
 
-    if (editingTag && unusedTags.some((tag) => manager.normalizeName(tag) === manager.normalizeName(editingTag.name)))
+    if (editingTag && unusedTagIds.includes(editingTag.key))
       clearEditingTag()
 
-    onStatusChange(`Cleared ${unusedTags.length} unused ${manager.itemLabel.toLowerCase()} ${unusedTags.length === 1 ? 'tag' : 'tags'}.`)
+    onStatusChange(`Cleared ${unusedTagIds.length} unused ${manager.itemLabel.toLowerCase()} ${unusedTagIds.length === 1 ? 'tag' : 'tags'}.`)
   }
 
   function getManagerTags(manager: CatalogManager): Array<ActivityTagItem | PeopleTagItem | PointOfInterestTagItem> {
@@ -749,6 +801,32 @@ export function SettingsPage({
         </div>
       </div>
 
+      <div className="settings-section settings-data-folder-section" hidden={!isSettingsPage}>
+        <div className="settings-section-title">
+          <Save size={16} />
+          Local Data Folder
+        </div>
+        <p className="settings-section-note">All data is saved to this folder. Changing it moves existing data.</p>
+        <label>
+          Data Folder
+          <input
+            value={settings.dataFolder ?? ''}
+            readOnly
+            placeholder="Electron user data folder (default)"
+          />
+        </label>
+        <button
+          type="button"
+          className="settings-file-button"
+          onClick={async () => {
+            const folder = await (await import('../utils/storage')).pickDataFolder()
+            if (folder) onStatusChange(`Data folder changed to: ${folder}`)
+          }}
+        >
+          Choose Folder...
+        </button>
+      </div>
+
       <div className="settings-section tag-manager-section settings-tags-section" hidden={!isCatalogPage}>
         <div className="tag-manager-grid">
           <TagManagerList
@@ -762,6 +840,7 @@ export function SettingsPage({
             unusedCount={unusedActivityTagCount}
             onAdd={(color) => setAddingActivityColor(color)}
             onClearUnused={clearUnusedActivityTags}
+            onContextMenu={(tag, event) => handleTagContextMenu(tag, activityTagManager, event)}
             onExpandedColorChange={setExpandedActivityManagerColor}
             onGroupNameChange={updateActivityGroupName}
             onPinChange={updateActivityPin}
@@ -779,6 +858,7 @@ export function SettingsPage({
             unusedCount={unusedPeopleTagCount}
             onAdd={(color) => setAddingPeopleColor(color)}
             onClearUnused={clearUnusedPeopleTags}
+            onContextMenu={(tag, event) => handleTagContextMenu(tag, personTagManager, event)}
             onExpandedColorChange={setExpandedPeopleManagerColor}
             onGroupNameChange={updatePeopleGroupName}
             onPinChange={updatePeoplePin}
@@ -796,6 +876,7 @@ export function SettingsPage({
             unusedCount={unusedPointOfInterestTagCount}
             onAdd={(color) => setAddingPointOfInterestColor(color)}
             onClearUnused={clearUnusedPointOfInterestTags}
+            onContextMenu={(tag, event) => handleTagContextMenu(tag, pointOfInterestTagManager, event)}
             onExpandedColorChange={setExpandedPointOfInterestManagerColor}
             onGroupNameChange={updatePointOfInterestGroupName}
             onPinChange={updatePointOfInterestPin}
@@ -923,7 +1004,7 @@ export function SettingsPage({
           initialColor={editingActivityTag.color}
           initialName={editingActivityTag.name}
           onCancel={() => setEditingActivityTag(null)}
-          onDelete={() => deleteActivityTag(editingActivityTag.name)}
+          onDelete={() => deleteActivityTag(editingActivityTag.key)}
           onSave={(name, color) => applyActivityTag(editingActivityTag.name, name, color)}
         />
       )}
@@ -943,7 +1024,7 @@ export function SettingsPage({
           initialName={editingPeopleTag.name}
           itemLabel="Person"
           onCancel={() => setEditingPeopleTag(null)}
-          onDelete={() => deletePeopleTag(editingPeopleTag.name)}
+          onDelete={() => deletePeopleTag(editingPeopleTag.key)}
           onSave={(name, color) => applyPeopleTag(editingPeopleTag.name, name, color)}
         />
       )}
@@ -963,7 +1044,7 @@ export function SettingsPage({
           initialName={editingPointOfInterestTag.name}
           itemLabel="Point of Interest"
           onCancel={() => setEditingPointOfInterestTag(null)}
-          onDelete={() => deletePointOfInterestTag(editingPointOfInterestTag.name)}
+          onDelete={() => deletePointOfInterestTag(editingPointOfInterestTag.key)}
           onSave={(name, color) => applyPointOfInterestTag(editingPointOfInterestTag.name, name, color)}
         />
       )}
@@ -975,6 +1056,14 @@ export function SettingsPage({
           initialName={editingLocationTag.name}
           onCancel={() => setEditingLocationTag(null)}
           onSave={(city, color) => applyLocationTag(editingLocationTag, city, color)}
+        />
+      )}
+      {contextMenu && (
+        <TagContextMenu
+          items={contextMenu.items}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
         />
       )}
 
@@ -1116,6 +1205,7 @@ type TagManagerListProps<TTag extends DiaryTag> = {
   unusedCount?: number
   onAdd?: (color: string) => void
   onClearUnused?: () => void
+  onContextMenu?: (tag: TTag, event: React.MouseEvent) => void
   onExpandedColorChange: (color: string | null) => void
   onGroupNameChange: (color: string, name: string) => void
   onPinChange: (tag: TTag, pinned: boolean) => void
@@ -1133,6 +1223,7 @@ function TagManagerList<TTag extends DiaryTag>({
   unusedCount = 0,
   onAdd,
   onClearUnused,
+  onContextMenu,
   onExpandedColorChange,
   onGroupNameChange,
   onPinChange,
@@ -1202,6 +1293,7 @@ function TagManagerList<TTag extends DiaryTag>({
                     name={tag.name}
                     pinned={tag.pinned}
                     onClick={() => onTagClick(tag)}
+                    onContextMenu={onContextMenu ? (e) => onContextMenu(tag, e) : undefined}
                   />
                   <button
                     className={tag.pinned ? 'tag-pin-button pinned' : 'tag-pin-button'}

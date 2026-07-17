@@ -1,3 +1,5 @@
+import type { PersonMentionOption } from '../components/EntryEditor'
+import { mirrorToFiles } from './storage'
 import {
   DEFAULT_CITY,
   DEFAULT_LOCATION_COLOR,
@@ -12,8 +14,7 @@ import { buildDiaryCatalog, deserializeDiaryCatalog } from '../domain/diaryCatal
 import type { AppSettings, City, DiaryCatalog, DiaryEntry, NotebookGroup, PullConflict, RecentCity, RecentTag, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
-import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTagColors, normalizeTags, sanitizeTag } from './tags'
-import { getSettingsPersonColor, getSettingsPointOfInterestColor } from './settings'
+import { normalizePersonTag, normalizePointOfInterestTag, normalizeTags, sanitizeTag } from './tags'
 import { areRecordsEqual, areStringArraysEqual, getNormalizedDailyWeatherFields } from './diaryEntryHelpers'
 import { normalizeBodyText } from './syncErrorLog'
 
@@ -169,6 +170,7 @@ export function loadStoredDiaryCatalog(): DiaryCatalog {
 
 export function saveStoredDiaryCatalog(catalog: DiaryCatalog) {
   localStorage.setItem(DIARY_CATALOG_STORAGE_KEY, JSON.stringify(catalog))
+  mirrorToFiles()
 }
 
 export function saveLoadedEntries(entries: DiaryEntry[], loadedMonthKeys: Set<string>): DiaryMonthIndex {
@@ -209,6 +211,7 @@ function saveEntriesToMonthStorage(
   }
 
   localStorage.setItem(MONTH_INDEX_KEY, JSON.stringify(monthIndex))
+  mirrorToFiles()
   return monthIndex
 }
 
@@ -361,9 +364,10 @@ function isDiaryDateReference(reference: unknown): reference is string {
 export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
   const legacyEffortMigration = getLegacyEffortTagMigration(entry)
   const updatedAt = legacyEffortMigration ? new Date().toISOString() : entry.updatedAt ?? new Date().toISOString()
-  const tags = normalizeTags(legacyEffortMigration?.tags ?? entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
-  const people = normalizePersonTags(entry.people ?? []).slice(0, MAX_PEOPLE_PER_ENTRY)
-  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? []).slice(0, MAX_POINTS_OF_INTEREST_PER_ENTRY)
+  // Tags are now GUIDs — do NOT run name normalizers on them
+  const tags = (legacyEffortMigration?.tags ?? entry.tags).slice(0, MAX_ACTIVITIES_PER_ENTRY)
+  const people = (entry.people ?? []).slice(0, MAX_PEOPLE_PER_ENTRY)
+  const pointsOfInterest = (entry.pointsOfInterest ?? []).slice(0, MAX_POINTS_OF_INTEREST_PER_ENTRY)
   const weatherSamples = normalizeWeatherSamples(entry.weatherSamples)
   const dailyWeatherCode =
     typeof entry.dailyWeatherCode === 'number'
@@ -392,15 +396,24 @@ export function normalizeEntry(entry: DiaryEntry): DiaryEntry {
     dailyWeatherText,
     dailyPrecipitationMm,
     weatherSamples,
-    tagColors: normalizeTagColors(entry.tagColors ?? {}, tags),
-    personColors: normalizeTagColors(entry.personColors ?? {}, people, normalizePersonTag),
-    pointOfInterestColors: normalizeTagColors(entry.pointOfInterestColors ?? {}, pointsOfInterest, normalizePointOfInterestTag),
+    // Color maps are GUID-keyed — filter to only existing tag IDs, no name normalization
+    tagColors: filterColorsByKeys(entry.tagColors ?? {}, tags),
+    personColors: filterColorsByKeys(entry.personColors ?? {}, people),
+    pointOfInterestColors: filterColorsByKeys(entry.pointOfInterestColors ?? {}, pointsOfInterest),
     locationColors: normalizeLocationColors(entry.locationColors ?? {}, entry.cities),
     updatedAt,
     savedAt: legacyEffortMigration ? updatedAt : entry.savedAt ?? updatedAt ?? null,
     syncedAt,
     isEdited: legacyEffortMigration ? true : entry.isEdited ?? (!syncedAt || syncedAt < updatedAt),
   }
+}
+
+function filterColorsByKeys(colors: Record<string, string>, keys: string[]): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const key of keys) {
+    if (colors[key]) result[key] = colors[key]
+  }
+  return result
 }
 
 function getLegacyEffortTagMigration(entry: DiaryEntry): { content: string, tags: string[] } | null {
@@ -516,23 +529,19 @@ export function groupEntriesByNotebook(entries: DiaryEntry[]): NotebookGroup[] {
 }
 
 export function syncEntryRichTextTagColors(entry: DiaryEntry, settings: AppSettings): DiaryEntry {
-  const people = normalizePersonTags(entry.people ?? [])
+  const people = entry.people ?? []
   const personColors: Record<string, string> = {}
-  const pointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
+  const pointsOfInterest = entry.pointsOfInterest ?? []
   const pointOfInterestColors: Record<string, string> = {}
 
-  for (const person of people) {
-    const color = getSettingsPersonColor(settings, person) ?? entry.personColors?.[person]
-
-    if (color)
-      personColors[person] = color
+  for (const id of people) {
+    const color = settings.peopleTags[id]?.color ?? entry.personColors?.[id]
+    if (color) personColors[id] = color
   }
 
-  for (const pointOfInterest of pointsOfInterest) {
-    const color = getSettingsPointOfInterestColor(settings, pointOfInterest) ?? entry.pointOfInterestColors?.[pointOfInterest]
-
-    if (color)
-      pointOfInterestColors[pointOfInterest] = color
+  for (const id of pointsOfInterest) {
+    const color = settings.pointOfInterestTags[id]?.color ?? entry.pointOfInterestColors?.[id]
+    if (color) pointOfInterestColors[id] = color
   }
 
   if (
@@ -552,32 +561,25 @@ export function syncEntryRichTextTagColors(entry: DiaryEntry, settings: AppSetti
   }
 }
 
-export function getPeopleMentionOptions(settings: AppSettings, catalog: DiaryCatalog, draft: DiaryEntry): Array<{ name: string; color: string }> {
-  const people = new Map<string, string>()
+export function getPeopleMentionOptions(settings: AppSettings, catalog: DiaryCatalog, draft: DiaryEntry): PersonMentionOption[] {
+  const people = new Map<string, PersonMentionOption>()
 
-  for (const [rawName, tag] of Object.entries(settings.peopleTags)) {
-    const person = normalizePersonTag(rawName)
-
-    if (person)
-      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  for (const [id, tag] of Object.entries(settings.peopleTags)) {
+    if (!id) continue
+    people.set(id, { id, name: tag.name || id, color: tag.color || DEFAULT_TAG_COLOR })
   }
 
-  for (const [rawName, tag] of Object.entries(catalog.people)) {
-    const person = normalizePersonTag(rawName)
-
-    if (person && !people.has(person))
-      people.set(person, tag.color || DEFAULT_TAG_COLOR)
+  for (const [id, tag] of Object.entries(catalog.people)) {
+    if (!id || people.has(id)) continue
+    people.set(id, { id, name: tag.name || id, color: tag.color || DEFAULT_TAG_COLOR })
   }
 
-  for (const rawPerson of draft.people ?? []) {
-    const person = normalizePersonTag(rawPerson)
-
-    if (person)
-      people.set(person, draft.personColors?.[rawPerson] ?? people.get(person) ?? DEFAULT_TAG_COLOR)
+  for (const id of draft.people ?? []) {
+    if (!id || people.has(id)) continue
+    people.set(id, { id, name: settings.peopleTags[id]?.name || catalog.people[id]?.name || id, color: draft.personColors?.[id] ?? DEFAULT_TAG_COLOR })
   }
 
-  return Array.from(people.entries())
-    .map(([name, color]) => ({ name, color }))
+  return Array.from(people.values())
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -640,7 +642,7 @@ export function getRecentTags(entries: DiaryEntry[]): RecentTag[] {
   }
 
   return Array.from(tags.entries())
-    .map(([name, color]) => ({ name, color }))
+    .map(([name, color]) => ({ id: name, name, color }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -659,7 +661,7 @@ export function getRecentPeople(entries: DiaryEntry[]): RecentTag[] {
   }
 
   return Array.from(people.entries())
-    .map(([name, color]) => ({ name, color }))
+    .map(([name, color]) => ({ id: name, name, color }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -681,7 +683,7 @@ export function getRecentPointsOfInterest(entries: DiaryEntry[]): RecentTag[] {
   }
 
   return Array.from(pointsOfInterest.entries())
-    .map(([name, color]) => ({ name, color }))
+    .map(([name, color]) => ({ id: name, name, color }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -697,24 +699,20 @@ export function normalizeLocationColors(locationColors: Record<string, string>, 
 }
 
 export function getSavedDraftEntry(entry: DiaryEntry, savedAt: string): DiaryEntry {
-  const normalizedTags = normalizeTags(entry.tags)
-  const normalizedPeople = normalizePersonTags(entry.people ?? [])
-  const normalizedPointsOfInterest = normalizePointOfInterestTags(entry.pointsOfInterest ?? [])
+  const tags = entry.tags
+  const people = entry.people ?? []
+  const pointsOfInterest = entry.pointsOfInterest ?? []
   const normalizedCities = normalizeLocationColors(entry.locationColors, entry.cities)
 
   return {
     ...entry,
-    tags: normalizedTags,
-    people: normalizedPeople,
-    pointsOfInterest: normalizedPointsOfInterest,
+    tags,
+    people,
+    pointsOfInterest,
     ...getNormalizedDailyWeatherFields(entry),
-    tagColors: normalizeTagColors(entry.tagColors, normalizedTags),
-    personColors: normalizeTagColors(entry.personColors ?? {}, normalizedPeople, normalizePersonTag),
-    pointOfInterestColors: normalizeTagColors(
-      entry.pointOfInterestColors ?? {},
-      normalizedPointsOfInterest,
-      normalizePointOfInterestTag,
-    ),
+    tagColors: filterColorsByKeys(entry.tagColors, tags),
+    personColors: filterColorsByKeys(entry.personColors ?? {}, people),
+    pointOfInterestColors: filterColorsByKeys(entry.pointOfInterestColors ?? {}, pointsOfInterest),
     locationColors: normalizedCities,
     updatedAt: savedAt,
     savedAt,

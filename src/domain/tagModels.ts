@@ -1,8 +1,8 @@
 import { DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY, MAX_PEOPLE_PER_ENTRY, MAX_POINTS_OF_INTEREST_PER_ENTRY, TAG_COLOR_PALETTE } from './constants'
 import { formatCityDisplayName } from './city'
 import { updateEntryActivity, updateEntryPerson, updateEntryPointOfInterest } from './entryTags'
-import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTags, sanitizeTag } from './tags'
-import type { AppSettings, City, DiaryCatalog, DiaryEntry } from './types'
+import { normalizePersonTag, normalizePointOfInterestTag, sanitizeTag } from './tags'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, TagId } from './types'
 
 export type TagColorGroup<TTag extends DiaryTag> = {
   color: string
@@ -10,19 +10,22 @@ export type TagColorGroup<TTag extends DiaryTag> = {
   tags: TTag[]
 }
 
-type CatalogTagRecord = Record<string, { color: string; pinned?: boolean }>
-type CatalogReferenceTagRecord = Record<string, { color: string; pinned?: boolean; entries: string[] }>
+/** GUID → tag settings (settings catalog) */
+type CatalogTagRecord = Record<TagId, { name: string; color: string; pinned?: boolean }>
+/** GUID → tag with entry references (diary catalog) */
+type CatalogReferenceTagRecord = Record<TagId, { name: string; color: string; pinned?: boolean; entries: string[] }>
 
 export abstract class DiaryTag {
   abstract readonly kind: 'activity' | 'person' | 'location' | 'pointOfInterest'
 
-  readonly key: string
+  /** GUID — stable identity; never changes on rename or category move */
+  readonly key: TagId
   readonly name: string
   readonly color: string
   readonly count: number
   readonly pinned: boolean
 
-  protected constructor(key: string, name: string, color: string, count: number, pinned = false) {
+  protected constructor(key: TagId, name: string, color: string, count: number, pinned = false) {
     this.key = key
     this.name = name
     this.color = color
@@ -34,16 +37,16 @@ export abstract class DiaryTag {
 export class ActivityTag extends DiaryTag {
   readonly kind = 'activity'
 
-  constructor(name: string, color: string, count = 0, pinned = false) {
-    super(name, name, color, count, pinned)
+  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
+    super(id, name, color, count, pinned)
   }
 }
 
 export class PersonTag extends DiaryTag {
   readonly kind = 'person'
 
-  constructor(name: string, color: string, count = 0, pinned = false) {
-    super(name, name, color, count, pinned)
+  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
+    super(id, name, color, count, pinned)
   }
 }
 
@@ -58,8 +61,8 @@ export class LocationTag extends DiaryTag {
 export class PointOfInterestTag extends DiaryTag {
   readonly kind = 'pointOfInterest'
 
-  constructor(name: string, color: string, count = 0, pinned = false) {
-    super(name, name, color, count, pinned)
+  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
+    super(id, name, color, count, pinned)
   }
 }
 
@@ -91,42 +94,38 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
   abstract readonly maxTags: number
   abstract readonly panelClassName: string
 
-  abstract createTag(name: string, color: string, count?: number, pinned?: boolean): TTag
-  abstract getEntryNames(entry: DiaryEntry): string[]
-  abstract getEntryColors(entry: DiaryEntry): Record<string, string>
+  abstract createTag(id: TagId, name: string, color: string, count?: number, pinned?: boolean): TTag
+  abstract getEntryTagIds(entry: DiaryEntry): TagId[]
+  abstract getEntryColors(entry: DiaryEntry): Record<TagId, string>
   abstract getCatalog(settings: AppSettings): CatalogTagRecord
   abstract getColorNames(settings: AppSettings): Record<string, string>
   abstract getColorGroupName(settings: AppSettings, color: string): string
   abstract setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings
   abstract setColorGroupName(settings: AppSettings, color: string, name: string): AppSettings
-  abstract updateEntryTag(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry
-  abstract buildDraftPatch(tags: string[], colors: Record<string, string>): Partial<DiaryEntry>
+  abstract updateEntryTag(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry
+  abstract buildDraftPatch(ids: TagId[], colors: Record<TagId, string>): Partial<DiaryEntry>
+
+  resolveTagName(settings: AppSettings, id: TagId): string {
+    return this.getCatalog(settings)[id]?.name ?? id
+  }
 
   collect(entries: DiaryEntry[], settings: AppSettings): TTag[] {
-    const tags = new Map<string, TTag>()
+    const catalog = this.getCatalog(settings)
+    const tags = new Map<TagId, TTag>()
 
-    for (const [name, tag] of Object.entries(this.getCatalog(settings))) {
-      const normalizedName = this.normalizeName(name)
-
-      if (!normalizedName)
-        continue
-
-      tags.set(normalizedName, this.createTag(normalizedName, tag.color || DEFAULT_TAG_COLOR, 0, tag.pinned === true))
+    for (const [id, tag] of Object.entries(catalog)) {
+      tags.set(id, this.createTag(id, tag.name, tag.color || DEFAULT_TAG_COLOR, 0, tag.pinned === true))
     }
 
     for (const entry of entries) {
       const entryColors = this.getEntryColors(entry)
 
-      for (const rawTag of this.getEntryNames(entry)) {
-        const name = this.normalizeName(rawTag)
-
-        if (!name)
-          continue
-
-        const current = tags.get(name)
-        tags.set(name, this.createTag(
-          name,
-          current?.color ?? entryColors[rawTag] ?? DEFAULT_TAG_COLOR,
+      for (const id of this.getEntryTagIds(entry)) {
+        const current = tags.get(id)
+        tags.set(id, this.createTag(
+          id,
+          current?.name ?? catalog[id]?.name ?? id,
+          current?.color ?? entryColors[id] ?? DEFAULT_TAG_COLOR,
           (current?.count ?? 0) + 1,
           current?.pinned === true,
         ))
@@ -137,31 +136,24 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
   }
 
   collectFromCatalog(catalogTags: CatalogReferenceTagRecord, settings: AppSettings): TTag[] {
-    const tags = new Map<string, TTag>()
+    const catalog = this.getCatalog(settings)
+    const tags = new Map<TagId, TTag>()
 
-    for (const [name, tag] of Object.entries(catalogTags)) {
-      const normalizedName = this.normalizeName(name)
-
-      if (!normalizedName)
-        continue
-
-      tags.set(normalizedName, this.createTag(
-        normalizedName,
+    for (const [id, tag] of Object.entries(catalogTags)) {
+      tags.set(id, this.createTag(
+        id,
+        tag.name,
         tag.color || DEFAULT_TAG_COLOR,
         tag.entries.length,
         tag.pinned === true,
       ))
     }
 
-    for (const [name, tag] of Object.entries(this.getCatalog(settings))) {
-      const normalizedName = this.normalizeName(name)
-
-      if (!normalizedName)
-        continue
-
-      const current = tags.get(normalizedName)
-      tags.set(normalizedName, this.createTag(
-        normalizedName,
+    for (const [id, tag] of Object.entries(catalog)) {
+      const current = tags.get(id)
+      tags.set(id, this.createTag(
+        id,
+        tag.name || current?.name || id,
         tag.color || current?.color || DEFAULT_TAG_COLOR,
         current?.count ?? 0,
         tag.pinned === true || current?.pinned === true,
@@ -178,59 +170,54 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     return this.collect(entries.filter((entry) => entry.diaryDate >= cutoffDate), settings)
   }
 
-  addToEntry(entry: DiaryEntry, rawTag: string, color: string): Partial<DiaryEntry> | null {
-    const tag = this.normalizeName(rawTag)
-
-    if (!tag)
+  addToEntry(entry: DiaryEntry, tagId: TagId, color: string): Partial<DiaryEntry> | null {
+    if (!tagId)
       return null
 
-    return this.buildDraftPatch([...this.getEntryNames(entry), tag], {
+    return this.buildDraftPatch([...this.getEntryTagIds(entry), tagId], {
       ...this.getEntryColors(entry),
-      [tag]: color,
+      [tagId]: color,
     })
   }
 
-  removeFromEntry(entry: DiaryEntry, rawTag: string): Partial<DiaryEntry> {
-    const normalizedTag = this.normalizeName(rawTag)
+  removeFromEntry(entry: DiaryEntry, tagId: TagId): Partial<DiaryEntry> {
     const colors = { ...this.getEntryColors(entry) }
-
-    for (const tag of this.getEntryNames(entry)) {
-      if (this.normalizeName(tag) === normalizedTag)
-        delete colors[tag]
-    }
+    delete colors[tagId]
 
     return this.buildDraftPatch(
-      this.getEntryNames(entry).filter((tag) => this.normalizeName(tag) !== normalizedTag),
+      this.getEntryTagIds(entry).filter((id) => id !== tagId),
       colors,
     )
   }
 
-  updateCatalog(catalog: CatalogTagRecord, oldTag: string, nextTag: string, color: string): CatalogTagRecord {
-    const normalizedOldTag = this.normalizeName(oldTag)
-    const normalizedNextTag = this.normalizeName(nextTag)
+  updateCatalog(catalog: CatalogTagRecord, oldTagId: TagId, nextTagId: TagId, color: string): CatalogTagRecord {
     const nextCatalog: CatalogTagRecord = {}
-    const oldPinned = Object.entries(catalog).some(([name, tag]) => this.normalizeName(name) === normalizedOldTag && tag.pinned === true)
-    const nextPinned = normalizedNextTag
-      ? Object.entries(catalog).some(([name, tag]) => this.normalizeName(name) === normalizedNextTag && tag.pinned === true)
-      : false
+    const oldEntry = catalog[oldTagId]
+    const nextEntry = catalog[nextTagId]
+    const oldPinned = oldEntry?.pinned === true
+    const nextPinned = nextEntry?.pinned === true
 
-    for (const [name, tag] of Object.entries(catalog)) {
-      if (this.normalizeName(name) !== normalizedOldTag)
-        nextCatalog[name] = tag
+    for (const [id, tag] of Object.entries(catalog)) {
+      if (id !== oldTagId)
+        nextCatalog[id] = tag
     }
 
-    if (normalizedNextTag)
-      nextCatalog[normalizedNextTag] = { color, pinned: oldPinned || nextPinned }
+    if (nextTagId) {
+      nextCatalog[nextTagId] = {
+        name: nextEntry?.name ?? oldEntry?.name ?? nextTagId,
+        color,
+        pinned: oldPinned || nextPinned,
+      }
+    }
 
     return nextCatalog
   }
 
-  updateCatalogPin(catalog: CatalogTagRecord, tag: string, pinned: boolean): CatalogTagRecord {
-    const normalizedTag = this.normalizeName(tag)
+  updateCatalogPin(catalog: CatalogTagRecord, tagId: TagId, pinned: boolean): CatalogTagRecord {
     const nextCatalog: CatalogTagRecord = {}
 
-    for (const [name, item] of Object.entries(catalog)) {
-      nextCatalog[name] = this.normalizeName(name) === normalizedTag
+    for (const [id, item] of Object.entries(catalog)) {
+      nextCatalog[id] = id === tagId
         ? { ...item, pinned }
         : item
     }
@@ -238,22 +225,22 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     return nextCatalog
   }
 
-  deleteCatalogTags(catalog: CatalogTagRecord, tags: string[]): CatalogTagRecord {
-    const normalizedTags = new Set(tags.map((tag) => this.normalizeName(tag)).filter(Boolean))
+  deleteCatalogTags(catalog: CatalogTagRecord, tagIds: TagId[]): CatalogTagRecord {
+    const removeSet = new Set(tagIds.filter(Boolean))
     const nextCatalog: CatalogTagRecord = {}
 
-    for (const [name, tag] of Object.entries(catalog)) {
-      if (!normalizedTags.has(this.normalizeName(name)))
-        nextCatalog[name] = tag
+    for (const [id, tag] of Object.entries(catalog)) {
+      if (!removeSet.has(id))
+        nextCatalog[id] = tag
     }
 
     return nextCatalog
   }
 
-  deleteEntryTag(entry: DiaryEntry, tag: string): DiaryEntry {
-    const patch = this.removeFromEntry(entry, tag)
+  deleteEntryTag(entry: DiaryEntry, tagId: TagId): DiaryEntry {
+    const patch = this.removeFromEntry(entry, tagId)
 
-    if (this.getEntryNames(entry).length === this.getEntryNames({ ...entry, ...patch }).length)
+    if (this.getEntryTagIds(entry).length === this.getEntryTagIds({ ...entry, ...patch }).length)
       return entry
 
     return {
@@ -279,15 +266,15 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
     return sanitizeTag(value)
   }
 
-  createTag(name: string, color: string, count = 0, pinned = false): ActivityTag {
-    return new ActivityTag(name, color, count, pinned)
+  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): ActivityTag {
+    return new ActivityTag(id, name, color, count, pinned)
   }
 
-  getEntryNames(entry: DiaryEntry): string[] {
+  getEntryTagIds(entry: DiaryEntry): TagId[] {
     return entry.tags ?? []
   }
 
-  getEntryColors(entry: DiaryEntry): Record<string, string> {
+  getEntryColors(entry: DiaryEntry): Record<TagId, string> {
     return entry.tagColors ?? {}
   }
 
@@ -320,13 +307,13 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
     }
   }
 
-  updateEntryTag(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-    return updateEntryActivity(entry, oldTag, nextTag, color)
+  updateEntryTag(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+    return updateEntryActivity(entry, oldTagId, nextTagId, color)
   }
 
-  buildDraftPatch(tags: string[], colors: Record<string, string>): Partial<DiaryEntry> {
+  buildDraftPatch(ids: TagId[], colors: Record<TagId, string>): Partial<DiaryEntry> {
     return {
-      tags: normalizeTags(tags),
+      tags: ids,
       tagColors: colors,
     }
   }
@@ -342,15 +329,15 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
     return normalizePersonTag(value)
   }
 
-  createTag(name: string, color: string, count = 0, pinned = false): PersonTag {
-    return new PersonTag(name, color, count, pinned)
+  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): PersonTag {
+    return new PersonTag(id, name, color, count, pinned)
   }
 
-  getEntryNames(entry: DiaryEntry): string[] {
+  getEntryTagIds(entry: DiaryEntry): TagId[] {
     return entry.people ?? []
   }
 
-  getEntryColors(entry: DiaryEntry): Record<string, string> {
+  getEntryColors(entry: DiaryEntry): Record<TagId, string> {
     return entry.personColors ?? {}
   }
 
@@ -383,13 +370,13 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
     }
   }
 
-  updateEntryTag(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-    return updateEntryPerson(entry, oldTag, nextTag, color)
+  updateEntryTag(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+    return updateEntryPerson(entry, oldTagId, nextTagId, color)
   }
 
-  buildDraftPatch(tags: string[], colors: Record<string, string>): Partial<DiaryEntry> {
+  buildDraftPatch(ids: TagId[], colors: Record<TagId, string>): Partial<DiaryEntry> {
     return {
-      people: normalizePersonTags(tags),
+      people: ids,
       personColors: colors,
     }
   }
@@ -405,15 +392,15 @@ export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInt
     return normalizePointOfInterestTag(value)
   }
 
-  createTag(name: string, color: string, count = 0, pinned = false): PointOfInterestTag {
-    return new PointOfInterestTag(name, color, count, pinned)
+  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): PointOfInterestTag {
+    return new PointOfInterestTag(id, name, color, count, pinned)
   }
 
-  getEntryNames(entry: DiaryEntry): string[] {
+  getEntryTagIds(entry: DiaryEntry): TagId[] {
     return entry.pointsOfInterest ?? []
   }
 
-  getEntryColors(entry: DiaryEntry): Record<string, string> {
+  getEntryColors(entry: DiaryEntry): Record<TagId, string> {
     return entry.pointOfInterestColors ?? {}
   }
 
@@ -446,13 +433,13 @@ export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInt
     }
   }
 
-  updateEntryTag(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-    return updateEntryPointOfInterest(entry, oldTag, nextTag, color)
+  updateEntryTag(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+    return updateEntryPointOfInterest(entry, oldTagId, nextTagId, color)
   }
 
-  buildDraftPatch(tags: string[], colors: Record<string, string>): Partial<DiaryEntry> {
+  buildDraftPatch(ids: TagId[], colors: Record<TagId, string>): Partial<DiaryEntry> {
     return {
-      pointsOfInterest: normalizePointOfInterestTags(tags),
+      pointsOfInterest: ids,
       pointOfInterestColors: colors,
     }
   }
@@ -533,6 +520,9 @@ export function getLocationTagKey(city: City): string {
 function compareTags<TTag extends DiaryTag>(a: TTag, b: TTag): number {
   if (a.pinned !== b.pinned)
     return a.pinned ? -1 : 1
+
+  if (a.count !== b.count)
+    return b.count - a.count
 
   return a.name.localeCompare(b.name)
 }

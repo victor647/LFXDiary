@@ -167,6 +167,16 @@ export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSetting
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
   const existingCatalogRaw = await readOptionalRepoFile(fs, catalogPath)
+
+  // Backup existing catalog before overwriting
+  const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
+  if (existingCatalogRaw) {
+    await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
+    await writeRepoFile(fs, backupPath, existingCatalogRaw)
+  }
+
   const localCatalog = applySettingsToDiaryCatalog(buildDiaryCatalog(catalogEntries), settings)
   const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
   const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog

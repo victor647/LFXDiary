@@ -1,4 +1,4 @@
-const { app, BrowserWindow, net, protocol, session, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -41,6 +41,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
@@ -103,6 +104,55 @@ function serveStaticFile(pathname) {
 }
 
 app.whenReady().then(() => {
+  const userDataPath = app.getPath('userData')
+  const configPath = path.join(userDataPath, 'diary-config.json')
+
+  function getDataFolder() {
+    try {
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+        if (config.dataFolder && fs.existsSync(config.dataFolder))
+          return config.dataFolder
+      }
+    } catch { /* use default */ }
+    return userDataPath
+  }
+
+  function setDataFolder(folderPath) {
+    fs.writeFileSync(configPath, JSON.stringify({ dataFolder: folderPath }), 'utf-8')
+  }
+
+  function readDataFile(filename) {
+    const filePath = path.join(getDataFolder(), filename)
+    try {
+      if (fs.existsSync(filePath))
+        return fs.readFileSync(filePath, 'utf-8')
+    } catch (e) {
+      console.error(`Error reading ${filename}:`, e)
+    }
+    return null
+  }
+
+  function writeDataFile(filename, data) {
+    const folder = getDataFolder()
+    if (!fs.existsSync(folder))
+      fs.mkdirSync(folder, { recursive: true })
+    fs.writeFileSync(path.join(folder, filename), data, 'utf-8')
+  }
+
+  ipcMain.handle('diary:readFile', (_event, filename) => readDataFile(filename))
+  ipcMain.handle('diary:writeFile', (_event, filename, data) => { writeDataFile(filename, data); return true })
+  ipcMain.handle('diary:getDataFolder', () => getDataFolder())
+  ipcMain.handle('diary:pickDataFolder', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
+    if (!result.canceled && result.filePaths[0]) {
+      setDataFolder(result.filePaths[0])
+      return result.filePaths[0]
+    }
+    return getDataFolder()
+  })
+
   registerAppProtocol()
 
   session.defaultSession.setCertificateVerifyProc((request, callback) => {

@@ -1,103 +1,47 @@
-import type { DiaryEntry } from './types'
-import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTags, sanitizeTag } from './tags'
+import type { DiaryEntry, TagId } from './types'
 
-export function updateEntryActivity(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  return updateEntryTagSet(entry, oldTag, nextTag, color, 'tags', 'tagColors', sanitizeTag, normalizeTags)
+export function updateEntryActivity(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+  return updateEntryTagSet(entry, oldTagId, nextTagId, color, 'tags', 'tagColors')
 }
 
-export function updateEntryPerson(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  const updatedEntry = updateEntryTagSet(entry, oldTag, nextTag, color, 'people', 'personColors', normalizePersonTag, normalizePersonTags)
-  if (updatedEntry === entry)
-    return entry
-
-  const normalizedNextTag = normalizePersonTag(nextTag)
-  const nextContent = replaceTagReferences(updatedEntry.content, [normalizePersonTag(oldTag), oldTag], normalizedNextTag)
-
-  if (nextContent === updatedEntry.content)
-    return updatedEntry
-
-  return {
-    ...updatedEntry,
-    content: nextContent,
-  }
+export function updateEntryPerson(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+  return updateEntryTagSet(entry, oldTagId, nextTagId, color, 'people', 'personColors')
 }
 
-export function updateEntryPointOfInterest(entry: DiaryEntry, oldTag: string, nextTag: string, color: string): DiaryEntry {
-  const updatedEntry = updateEntryTagSet(
-    entry,
-    oldTag,
-    nextTag,
-    color,
-    'pointsOfInterest',
-    'pointOfInterestColors',
-    normalizePointOfInterestTag,
-    normalizePointOfInterestTags,
-  )
-  if (updatedEntry === entry)
-    return entry
-
-  const normalizedNextTag = normalizePointOfInterestTag(nextTag)
-  const nextContent = replaceTagReferences(updatedEntry.content, [normalizePointOfInterestTag(oldTag), oldTag], normalizedNextTag)
-
-  if (nextContent === updatedEntry.content)
-    return updatedEntry
-
-  return {
-    ...updatedEntry,
-    content: nextContent,
-  }
-}
-
-function replaceTagReferences(content: string, oldValues: string[], nextValue: string): string {
-  const values = Array.from(new Set(oldValues.map((value) => value.trim()).filter((value) => value && value !== nextValue)))
-    .sort((a, b) => b.length - a.length)
-
-  if (!values.length || !nextValue)
-    return content
-
-  const pattern = new RegExp(values.map(escapeRegExp).join('|'), 'g')
-  return content.replace(pattern, nextValue)
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+export function updateEntryPointOfInterest(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry {
+  return updateEntryTagSet(entry, oldTagId, nextTagId, color, 'pointsOfInterest', 'pointOfInterestColors')
 }
 
 function updateEntryTagSet(
   entry: DiaryEntry,
-  oldTag: string,
-  nextTag: string,
+  oldTagId: TagId,
+  nextTagId: TagId,
   color: string,
   tagField: 'tags' | 'people' | 'pointsOfInterest',
   colorField: 'tagColors' | 'personColors' | 'pointOfInterestColors',
-  normalize: (value: string) => string,
-  normalizeMany: (values: string[]) => string[],
 ): DiaryEntry {
-  const normalizedOldTag = normalize(oldTag)
-  const normalizedNextTag = normalize(nextTag)
-
-  if (!normalizedOldTag || !normalizedNextTag)
+  if (!oldTagId || !nextTagId)
     return entry
 
   const tagColors = { ...(entry[colorField] ?? {}) }
   let changed = false
-  const tags = (entry[tagField] ?? []).map((tag) => {
-    if (normalize(tag) !== normalizedOldTag)
-      return tag
+  const tags = (entry[tagField] ?? []).map((id) => {
+    if (id !== oldTagId)
+      return id
 
     changed = true
-    delete tagColors[tag]
-    return normalizedNextTag
+    delete tagColors[id]
+    return nextTagId
   })
 
   if (!changed)
     return entry
 
-  tagColors[normalizedNextTag] = color
+  tagColors[nextTagId] = color
 
   return {
     ...entry,
-    [tagField]: normalizeMany(tags),
+    [tagField]: tags,
     [colorField]: tagColors,
     updatedAt: new Date().toISOString(),
     isEdited: true,

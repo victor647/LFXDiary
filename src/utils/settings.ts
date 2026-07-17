@@ -11,6 +11,9 @@ import {
   TAG_COLOR_PALETTE,
   TEMPERATURE_COLOR_BAND_DEFINITIONS,
 } from '../domain/constants'
+import { runMigrationIfNeeded } from '../domain/tagMigration'
+import type { DiaryCatalog } from '../domain/types'
+import { mirrorToFiles } from './storage'
 import type { AppSettings, TemperatureColorBand, TemperatureThresholds } from '../domain/types'
 import { normalizePersonTag, normalizePointOfInterestTag } from './tags'
 
@@ -47,6 +50,9 @@ export const defaultSettings: AppSettings = {
 }
 
 export function loadSettings(): AppSettings {
+  // Run GUID migration if needed (safe to call multiple times)
+  runMigrationIfNeeded()
+
   const raw = localStorage.getItem(SETTINGS_KEY)
 
   if (!raw)
@@ -61,6 +67,7 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)))
+  mirrorToFiles()
 }
 
 export function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
@@ -222,13 +229,14 @@ function normalizeActivityColorGroupNames(names: Record<string, string>): Record
 function normalizeActivityTags(tags: AppSettings['activityTags']): AppSettings['activityTags'] {
   const normalized: AppSettings['activityTags'] = {}
 
-  for (const [rawName, tag] of Object.entries(tags)) {
-    const name = rawName.trim()
+  for (const [id, tag] of Object.entries(tags)) {
+    const name = tag.name?.trim() || id.trim()
 
     if (!name)
       continue
 
-    normalized[name] = {
+    normalized[id] = {
+      name,
       color: tag.color || DEFAULT_TAG_COLOR,
       pinned: tag.pinned === true,
     }
@@ -294,4 +302,82 @@ export function getSettingsPointOfInterestColor(settings: AppSettings, pointOfIn
   }
 
   return null
+}
+
+/** Repair tag names that were corrupted to GUIDs — cross-references with catalog for display names */
+export function repairSettingsTagNames(settings: AppSettings, catalog: DiaryCatalog): AppSettings {
+  const validActivityIds = new Set(Object.keys(catalog.activities))
+  const validPersonIds = new Set(Object.keys(catalog.people))
+  const validPoiIds = new Set(Object.keys(catalog.pointsOfInterest))
+
+  return {
+    ...settings,
+    activityTags: pruneBrokenTags(repairTagSection(settings.activityTags, catalog.activities), validActivityIds),
+    peopleTags: pruneBrokenTags(repairTagSection(settings.peopleTags, catalog.people), validPersonIds),
+    pointOfInterestTags: pruneBrokenTags(repairTagSection(settings.pointOfInterestTags, catalog.pointsOfInterest), validPoiIds),
+  }
+}
+
+function repairTagSection(
+  tags: Record<string, { name: string; color: string; pinned?: boolean }>,
+  catalogSection: Record<string, { name: string; color: string; pinned?: boolean; entries?: unknown }>,
+): Record<string, { name: string; color: string; pinned?: boolean }> {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const result: Record<string, { name: string; color: string; pinned?: boolean }> = {}
+
+  for (const [id, tag] of Object.entries(tags)) {
+    if (uuidPattern.test(tag.name) || tag.name === id) {
+      const catalogName = catalogSection[id]?.name
+      result[id] = { ...tag, name: catalogName || tag.name }
+    } else {
+      result[id] = tag
+    }
+  }
+
+  return result
+}
+
+/** Remove tags whose key is not a valid UUID or that have no meaningful name and no catalog entry */
+function pruneBrokenTags(
+  tags: Record<string, { name: string; color: string; pinned?: boolean }>,
+  validCatalogIds: Set<string>,
+): Record<string, { name: string; color: string; pinned?: boolean }> {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const result: Record<string, { name: string; color: string; pinned?: boolean }> = {}
+
+  for (const [id, tag] of Object.entries(tags)) {
+    // Remove if key is not a valid UUID (was mangled by normalizer)
+    if (!uuidPattern.test(id)) continue
+
+    // Remove if no name and not in catalog
+    if (!tag.name?.trim() && !validCatalogIds.has(id)) continue
+
+    // Remove if name is just a UUID and not in catalog
+    if (uuidPattern.test(tag.name) && !validCatalogIds.has(id)) continue
+
+    result[id] = tag
+  }
+
+  return result
+}
+
+/** Remove entries from catalog sections whose keys are not valid UUIDs */
+export function cleanupBrokenCatalogTags(catalog: DiaryCatalog): DiaryCatalog {
+  return {
+    ...catalog,
+    activities: pruneBrokenCatalogSection(catalog.activities),
+    people: pruneBrokenCatalogSection(catalog.people),
+    pointsOfInterest: pruneBrokenCatalogSection(catalog.pointsOfInterest),
+  }
+}
+
+function pruneBrokenCatalogSection<T extends { name: string }>(section: Record<string, T>): Record<string, T> {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const result: Record<string, T> = {}
+  for (const [id, tag] of Object.entries(section)) {
+    if (uuidPattern.test(id) && tag.name && !uuidPattern.test(tag.name)) {
+      result[id] = tag
+    }
+  }
+  return result
 }

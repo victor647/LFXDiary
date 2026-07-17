@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_ACTIVITY_COLOR_GROUP_NAMES, DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
 import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
 
@@ -9,6 +9,7 @@ type ActivityChipButtonProps = {
   count?: number
   pinned?: boolean
   onClick: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
 type ActivityAddButtonProps = {
@@ -36,7 +37,7 @@ type ActivityEditDialogProps = {
   onSave: (name: string, color: string) => void
 }
 
-export function ActivityChipButton({ name, color, count, onClick }: ActivityChipButtonProps) {
+export function ActivityChipButton({ name, color, count, onClick, onContextMenu }: ActivityChipButtonProps) {
   return (
     <button
       type="button"
@@ -47,6 +48,7 @@ export function ActivityChipButton({ name, color, count, onClick }: ActivityChip
         color: getTagTextColor(color),
       }}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <span className="activity-chip-name">{name}</span>
       {typeof count === 'number' && <span className="activity-chip-count">{count}</span>}
@@ -154,6 +156,117 @@ export function ActivityEditDialog({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+export type ContextMenuAction = {
+  kind: 'action'
+  label: string
+  onClick: () => void
+}
+
+export type ContextMenuReferences = {
+  kind: 'references'
+  label: string
+  dates: string[]
+  onDateClick: (date: string) => void
+}
+
+export type ContextMenuItem = ContextMenuAction | ContextMenuReferences
+
+type TagContextMenuProps = {
+  items: ContextMenuItem[]
+  x: number
+  y: number
+  onClose: () => void
+}
+
+export function TagContextMenu({ items, x, y, onClose }: TagContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [expandedRefs, setExpandedRefs] = useState<number | null>(null)
+
+  // Clamp position to viewport
+  useLayoutEffect(() => {
+    if (!menuRef.current) return
+    const rect = menuRef.current.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    if (x + rect.width > vw) menuRef.current.style.left = `${Math.max(0, vw - rect.width - 8)}px`
+    else menuRef.current.style.left = `${x}px`
+
+    if (y + rect.height > vh) menuRef.current.style.top = `${Math.max(0, vh - rect.height - 8)}px`
+    else menuRef.current.style.top = `${y}px`
+  }, [x, y, items])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node))
+        onClose()
+    }
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [onClose])
+
+  if (!items.length) return null
+
+  return (
+    <div className="tag-context-menu tag-context-menu-fixed" ref={menuRef} role="menu" style={{ left: x, top: y }}>
+      {items.map((item, i) => {
+        if (item.kind === 'action') {
+          return (
+            <button
+              key={i}
+              className="tag-context-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => { item.onClick(); onClose() }}
+            >
+              {item.label}
+            </button>
+          )
+        }
+
+        // References item: click to expand/collapse date list
+        return (
+          <div key={i}>
+            <button
+              className="tag-context-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => setExpandedRefs(expandedRefs === i ? null : i)}
+            >
+              {item.label} ({item.dates.length})
+            </button>
+            {expandedRefs === i && (
+              <div className="tag-context-refs-panel">
+                {item.dates.length === 0 ? (
+                  <div className="tag-context-refs-empty">No references</div>
+                ) : (
+                  item.dates.map((date) => (
+                    <button
+                      key={date}
+                      className="tag-context-menu-item tag-context-ref-item"
+                      type="button"
+                      onClick={() => { item.onDateClick(date); onClose() }}
+                    >
+                      {date}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

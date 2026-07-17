@@ -1,6 +1,6 @@
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, DEFAULT_TAG_COLOR, weatherCodeText } from './constants'
 import { normalizePersonTag, normalizePointOfInterestTag, sanitizeTag } from './tags'
-import type { AppSettings, City, DiaryCatalog, DiaryEntry, YearCatalog } from './types'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, TagId, YearCatalog } from './types'
 import { getCityCatalogKey, isCity } from './metadata/locationMetadata'
 
 export const DIARY_CATALOG_FILE_NAME = 'lfx-diary-catalog.json'
@@ -12,9 +12,9 @@ type CatalogNamedTagMapValue = { name: string; color: string; pinned?: boolean; 
 
 export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   const locations = new Map<string, CatalogLocationMapValue>()
-  const activities = new Map<string, CatalogNamedTagMapValue>()
-  const people = new Map<string, CatalogNamedTagMapValue>()
-  const pointsOfInterest = new Map<string, CatalogNamedTagMapValue>()
+  const activities = new Map<TagId, CatalogNamedTagMapValue>()
+  const people = new Map<TagId, CatalogNamedTagMapValue>()
+  const pointsOfInterest = new Map<TagId, CatalogNamedTagMapValue>()
 
   locations.set(getCityCatalogKey(DEFAULT_CITY), {
     city: DEFAULT_CITY,
@@ -26,7 +26,7 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
     addEntryToCatalogMaps(locations, activities, people, pointsOfInterest, entry)
 
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
     locations: Object.fromEntries(
       Array.from(locations.entries())
@@ -39,30 +39,33 @@ export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
         }]),
     ),
     activities: Object.fromEntries(
-      Array.from(activities.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((activity) => [activity.name, {
-          color: activity.color,
-          pinned: activity.pinned === true,
-          entries: sortReferences(activity.entries),
+      Array.from(activities.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     people: Object.fromEntries(
-      Array.from(people.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((person) => [person.name, {
-          color: person.color,
-          pinned: person.pinned === true,
-          entries: sortReferences(person.entries),
+      Array.from(people.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     pointsOfInterest: Object.fromEntries(
-      Array.from(pointsOfInterest.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((pointOfInterest) => [pointOfInterest.name, {
-          color: pointOfInterest.color,
-          pinned: pointOfInterest.pinned === true,
-          entries: sortReferences(pointOfInterest.entries),
+      Array.from(pointsOfInterest.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     colorNames: {
@@ -148,9 +151,9 @@ function addEntryToDiaryCatalog(catalog: DiaryCatalog, entry: DiaryEntry): Diary
 
 function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry): DiaryCatalog {
   const locations = new Map<string, CatalogLocationMapValue>()
-  const activities = new Map<string, CatalogNamedTagMapValue>()
-  const people = new Map<string, CatalogNamedTagMapValue>()
-  const pointsOfInterest = new Map<string, CatalogNamedTagMapValue>()
+  const activities = new Map<TagId, CatalogNamedTagMapValue>()
+  const people = new Map<TagId, CatalogNamedTagMapValue>()
+  const pointsOfInterest = new Map<TagId, CatalogNamedTagMapValue>()
 
   for (const [key, location] of Object.entries(catalog.locations)) {
     locations.set(key, {
@@ -161,27 +164,27 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
     })
   }
 
-  for (const [name, activity] of Object.entries(catalog.activities)) {
-    activities.set(name, {
-      name,
+  for (const [id, activity] of Object.entries(catalog.activities)) {
+    activities.set(id, {
+      name: activity.name,
       color: activity.color,
       pinned: activity.pinned === true,
       entries: new Set(activity.entries),
     })
   }
 
-  for (const [name, person] of Object.entries(catalog.people)) {
-    people.set(name, {
-      name,
+  for (const [id, person] of Object.entries(catalog.people)) {
+    people.set(id, {
+      name: person.name,
       color: person.color,
       pinned: person.pinned === true,
       entries: new Set(person.entries),
     })
   }
 
-  for (const [name, pointOfInterest] of Object.entries(catalog.pointsOfInterest)) {
-    pointsOfInterest.set(name, {
-      name,
+  for (const [id, pointOfInterest] of Object.entries(catalog.pointsOfInterest)) {
+    pointsOfInterest.set(id, {
+      name: pointOfInterest.name,
       color: pointOfInterest.color,
       pinned: pointOfInterest.pinned === true,
       entries: new Set(pointOfInterest.entries),
@@ -191,7 +194,7 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
   addEntryToCatalogMaps(locations, activities, people, pointsOfInterest, entry)
 
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
     locations: Object.fromEntries(
       Array.from(locations.entries())
@@ -204,30 +207,33 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
         }]),
     ),
     activities: Object.fromEntries(
-      Array.from(activities.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((activity) => [activity.name, {
-          color: activity.color,
-          pinned: activity.pinned === true,
-          entries: sortReferences(activity.entries),
+      Array.from(activities.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     people: Object.fromEntries(
-      Array.from(people.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((person) => [person.name, {
-          color: person.color,
-          pinned: person.pinned === true,
-          entries: sortReferences(person.entries),
+      Array.from(people.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     pointsOfInterest: Object.fromEntries(
-      Array.from(pointsOfInterest.values())
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((pointOfInterest) => [pointOfInterest.name, {
-          color: pointOfInterest.color,
-          pinned: pointOfInterest.pinned === true,
-          entries: sortReferences(pointOfInterest.entries),
+      Array.from(pointsOfInterest.entries())
+        .sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([id, tag]) => [id, {
+          name: tag.name,
+          color: tag.color,
+          pinned: tag.pinned === true,
+          entries: sortReferences(tag.entries),
         }]),
     ),
     colorNames: catalog.colorNames ?? {
@@ -304,7 +310,7 @@ export function buildYearCatalog(entries: DiaryEntry[], year: string): YearCatal
   }
 
   return {
-    version: 1,
+    version: 2,
     year,
     locations: serializeYearRefMap(locations),
     activities: serializeYearRefMap(activities),
@@ -318,19 +324,20 @@ export function serializeYearCatalog(catalog: YearCatalog): string {
 `
 }
 
-export function deserializeYearCatalog(raw: string): YearCatalog | null {
+export function deserializeYearCatalog(rawStr: string): YearCatalog | null {
   try {
-    const catalog = JSON.parse(raw) as Partial<YearCatalog>
-    if (catalog.version !== 1 || typeof catalog.year !== 'string')
+    const raw = JSON.parse(rawStr) as Record<string, unknown>
+    const version = typeof raw.version === 'number' ? raw.version : 0
+    if (version !== 1 && version !== 2 || typeof raw.year !== 'string')
       return null
 
     return {
-      version: 1,
-      year: catalog.year,
-      locations: normalizeYearRefMap(catalog.locations),
-      activities: normalizeYearRefMap(catalog.activities),
-      people: normalizeYearRefMap(catalog.people),
-      pointsOfInterest: normalizeYearRefMap(catalog.pointsOfInterest),
+      version: 2,
+      year: raw.year as string,
+      locations: normalizeYearRefMap(raw.locations),
+      activities: normalizeYearRefMap(raw.activities),
+      people: normalizeYearRefMap(raw.people),
+      pointsOfInterest: normalizeYearRefMap(raw.pointsOfInterest),
     }
   } catch {
     return null
@@ -395,20 +402,124 @@ function mergeYearRefsIntoGlobalSection<T extends { entries: string[] }>(
 }
 
 export function mergeDiaryCatalogs(base: DiaryCatalog, incoming: DiaryCatalog): DiaryCatalog {
+  // If the incoming catalog is v1 (name-based keys), convert it to v2 before merging.
+  // Otherwise GUID keys from v2 would never match name keys from v1, corrupting the merge.
+  const normalizedIncoming = isV1Catalog(incoming) ? convertV1CatalogToV2(incoming, base) : incoming
+
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
-    locations: mergeLocationSections(base.locations, incoming.locations),
-    activities: mergeNamedTagSections(base.activities, incoming.activities),
-    people: mergeNamedTagSections(base.people, incoming.people),
-    pointsOfInterest: mergeNamedTagSections(base.pointsOfInterest, incoming.pointsOfInterest),
+    locations: mergeLocationSections(base.locations, normalizedIncoming.locations),
+    activities: mergeNamedTagSections(base.activities, normalizedIncoming.activities),
+    people: mergeNamedTagSections(base.people, normalizedIncoming.people),
+    pointsOfInterest: mergeNamedTagSections(base.pointsOfInterest, normalizedIncoming.pointsOfInterest),
     colorNames: {
-      activities: { ...(incoming.colorNames?.activities ?? {}), ...(base.colorNames?.activities ?? {}) },
-      people: { ...(incoming.colorNames?.people ?? {}), ...(base.colorNames?.people ?? {}) },
-      pointsOfInterest: { ...(incoming.colorNames?.pointsOfInterest ?? {}), ...(base.colorNames?.pointsOfInterest ?? {}) },
-      locations: { ...(incoming.colorNames?.locations ?? {}), ...(base.colorNames?.locations ?? {}) },
+      activities: { ...(normalizedIncoming.colorNames?.activities ?? {}), ...(base.colorNames?.activities ?? {}) },
+      people: { ...(normalizedIncoming.colorNames?.people ?? {}), ...(base.colorNames?.people ?? {}) },
+      pointsOfInterest: { ...(normalizedIncoming.colorNames?.pointsOfInterest ?? {}), ...(base.colorNames?.pointsOfInterest ?? {}) },
+      locations: { ...(normalizedIncoming.colorNames?.locations ?? {}), ...(base.colorNames?.locations ?? {}) },
     },
   }
+}
+
+/** Checks if a catalog uses v1 name-based keys (pre-GUID migration format) */
+function isV1Catalog(catalog: DiaryCatalog): boolean {
+  // v1 catalogs have name-based keys — check first entry in any section
+  const sampleActivity = Object.keys(catalog.activities)[0]
+  if (sampleActivity !== undefined && !isUuid(sampleActivity))
+    return true
+
+  const samplePerson = Object.keys(catalog.people)[0]
+  if (samplePerson !== undefined && !isUuid(samplePerson))
+    return true
+
+  const samplePoi = Object.keys(catalog.pointsOfInterest)[0]
+  if (samplePoi !== undefined && !isUuid(samplePoi))
+    return true
+
+  // Also check if values lack the 'name' field (v1 had only color/pinned/entries)
+  for (const tag of Object.values(catalog.activities)) {
+    if (!('name' in tag)) return true
+  }
+  for (const tag of Object.values(catalog.people)) {
+    if (!('name' in tag)) return true
+  }
+  for (const tag of Object.values(catalog.pointsOfInterest)) {
+    if (!('name' in tag)) return true
+  }
+
+  return false
+}
+
+/** Convert a v1 name-based catalog to v2 GUID-based format, using the base v2 catalog for name→GUID resolution */
+function convertV1CatalogToV2(incoming: DiaryCatalog, base: DiaryCatalog): DiaryCatalog {
+  // Build name→GUID maps from the base (v2) catalog
+  const activityNameToGuid = buildNameToGuidMap(base.activities)
+  const personNameToGuid = buildNameToGuidMap(base.people)
+  const poiNameToGuid = buildNameToGuidMap(base.pointsOfInterest)
+
+  return {
+    version: 2,
+    updatedAt: incoming.updatedAt,
+    locations: incoming.locations,
+    activities: convertV1SectionToV2(incoming.activities, activityNameToGuid),
+    people: convertV1SectionToV2(incoming.people, personNameToGuid),
+    pointsOfInterest: convertV1SectionToV2(incoming.pointsOfInterest, poiNameToGuid),
+    colorNames: incoming.colorNames ?? {
+      activities: {},
+      people: {},
+      pointsOfInterest: {},
+      locations: {},
+    },
+  }
+}
+
+function buildNameToGuidMap(section: DiaryCatalog['activities']): Map<string, TagId> {
+  const map = new Map<string, TagId>()
+  for (const [guid, tag] of Object.entries(section)) {
+    const normalizedName = tag.name.trim().toLowerCase()
+    if (normalizedName) map.set(normalizedName, guid)
+  }
+  return map
+}
+
+function convertV1SectionToV2(
+  section: Record<string, unknown>,
+  nameToGuid: Map<string, TagId>,
+): DiaryCatalog['activities'] {
+  const result: DiaryCatalog['activities'] = {}
+
+  for (const [key, rawTag] of Object.entries(section)) {
+    const tag = rawTag as { color?: string; pinned?: boolean; entries?: unknown; name?: string }
+    const tagName = tag.name ?? key
+    const normalizedName = tagName.trim().toLowerCase()
+
+    // Try to find an existing GUID from the base catalog
+    let guid: TagId | null = nameToGuid.get(normalizedName) ?? null
+
+    // If the key is already a UUID, use it
+    if (!guid && isUuid(key)) {
+      guid = key
+    }
+
+    // If no matching GUID found, generate a new one
+    if (!guid) {
+      guid = crypto.randomUUID() as TagId
+    }
+
+    result[guid] = {
+      name: tagName,
+      color: tag.color ?? DEFAULT_TAG_COLOR,
+      pinned: tag.pinned === true,
+      entries: normalizeReferences(tag.entries),
+    }
+  }
+
+  return result
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 }
 
 function mergeLocationSections(
@@ -452,6 +563,7 @@ function mergeNamedTagSections(
 
     if (baseTag && incomingTag) {
       merged[key] = {
+        name: baseTag.name,
         color: resolveTagColor(baseTag.color, incomingTag.color),
         pinned: baseTag.pinned === true || incomingTag.pinned === true,
         entries: mergeReferences(baseTag.entries, incomingTag.entries),
@@ -485,21 +597,22 @@ export function serializeWeatherCodes(): string {
   return `${JSON.stringify(weatherCodeText, null, 2)}\n`
 }
 
-export function deserializeDiaryCatalog(raw: string): DiaryCatalog | null {
+export function deserializeDiaryCatalog(rawStr: string): DiaryCatalog | null {
   try {
-    const catalog = JSON.parse(raw) as Partial<DiaryCatalog>
+    const raw = JSON.parse(rawStr) as Record<string, unknown>
+    const version = typeof raw.version === 'number' ? raw.version : 0
 
-    if (catalog.version !== 1)
+    if (version !== 1 && version !== 2)
       return null
 
     return {
-      version: 1,
-      updatedAt: typeof catalog.updatedAt === 'string' ? catalog.updatedAt : new Date().toISOString(),
-      locations: normalizeCatalogLocations(catalog.locations),
-      activities: normalizeCatalogActivities(catalog.activities),
-      people: normalizeCatalogActivities(catalog.people),
-      pointsOfInterest: normalizeCatalogActivities(catalog.pointsOfInterest),
-      colorNames: normalizeColorNames(catalog.colorNames),
+      version: 2,
+      updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+      locations: normalizeCatalogLocations(raw.locations),
+      activities: normalizeCatalogActivities(raw.activities),
+      people: normalizeCatalogActivities(raw.people),
+      pointsOfInterest: normalizeCatalogActivities(raw.pointsOfInterest),
+      colorNames: normalizeColorNames(raw.colorNames),
     }
   } catch {
     return null
@@ -575,8 +688,9 @@ function normalizeCatalogLocation(location: DiaryCatalog['locations'][string]): 
   }
 }
 
-function normalizeCatalogActivity(activity: { color: string; pinned?: boolean; entries?: unknown }): DiaryCatalog['activities'][string] {
+function normalizeCatalogActivity(activity: { name?: string; color: string; pinned?: boolean; entries?: unknown }): DiaryCatalog['activities'][string] {
   return {
+    name: typeof activity.name === 'string' ? activity.name : '',
     color: activity.color,
     pinned: activity.pinned === true,
     entries: normalizeReferences(activity.entries),
@@ -599,18 +713,19 @@ function applyNamedTagSettings(
   catalogTags: DiaryCatalog['activities'],
   settingsTags: AppSettings['activityTags'],
 ): DiaryCatalog['activities'] {
-  const tags = new Map<string, DiaryCatalog['activities'][string]>()
+  const tags = new Map<TagId, DiaryCatalog['activities'][string]>()
 
-  for (const [name, tag] of Object.entries(catalogTags)) {
-    tags.set(name, {
+  for (const [id, tag] of Object.entries(catalogTags)) {
+    tags.set(id, {
       ...tag,
       pinned: tag.pinned === true,
     })
   }
 
-  for (const [name, tag] of Object.entries(settingsTags)) {
-    const current = tags.get(name)
-    tags.set(name, {
+  for (const [id, tag] of Object.entries(settingsTags)) {
+    const current = tags.get(id)
+    tags.set(id, {
+      name: tag.name || current?.name || id,
       color: tag.color || current?.color || DEFAULT_TAG_COLOR,
       pinned: tag.pinned === true,
       entries: current?.entries ?? [],
@@ -619,8 +734,9 @@ function applyNamedTagSettings(
 
   return Object.fromEntries(
     Array.from(tags.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, tag]) => [name, {
+      .sort((a, b) => (a[1].name ?? a[0]).localeCompare(b[1].name ?? b[0]))
+      .map(([id, tag]) => [id, {
+        name: tag.name ?? id,
         color: tag.color,
         pinned: tag.pinned === true,
         entries: normalizeReferences(tag.entries),
@@ -631,8 +747,9 @@ function applyNamedTagSettings(
 function getNamedTagSettings(catalogTags: DiaryCatalog['activities']): AppSettings['activityTags'] {
   return Object.fromEntries(
     Object.entries(catalogTags)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, tag]) => [name, {
+      .sort((a, b) => (a[1].name ?? a[0]).localeCompare(b[1].name ?? b[0]))
+      .map(([id, tag]) => [id, {
+        name: tag.name ?? id,
         color: tag.color || DEFAULT_TAG_COLOR,
         pinned: tag.pinned === true,
       }]),
@@ -641,9 +758,9 @@ function getNamedTagSettings(catalogTags: DiaryCatalog['activities']): AppSettin
 
 function addEntryToCatalogMaps(
   locations: Map<string, CatalogLocationMapValue>,
-  activities: Map<string, CatalogNamedTagMapValue>,
-  people: Map<string, CatalogNamedTagMapValue>,
-  pointsOfInterest: Map<string, CatalogNamedTagMapValue>,
+  activities: Map<TagId, CatalogNamedTagMapValue>,
+  people: Map<TagId, CatalogNamedTagMapValue>,
+  pointsOfInterest: Map<TagId, CatalogNamedTagMapValue>,
   entry: DiaryEntry,
 ) {
   const entryReference = getEntryCatalogReference(entry)
@@ -659,46 +776,40 @@ function addEntryToCatalogMaps(
     })
   }
 
-  for (const tag of entry.tags) {
-    const normalizedTag = sanitizeTag(tag)
-
-    if (!normalizedTag)
+  for (const tagId of entry.tags) {
+    if (!tagId)
       continue
 
-    const current = activities.get(normalizedTag)
-    activities.set(normalizedTag, {
-      name: normalizedTag,
-      color: entry.tagColors[normalizedTag] ?? current?.color ?? DEFAULT_TAG_COLOR,
+    const current = activities.get(tagId)
+    activities.set(tagId, {
+      name: current?.name ?? tagId,
+      color: entry.tagColors[tagId] ?? current?.color ?? DEFAULT_TAG_COLOR,
       pinned: current?.pinned === true,
       entries: addReference(current?.entries, entryReference),
     })
   }
 
-  for (const person of entry.people ?? []) {
-    const normalizedPerson = normalizePersonTag(person)
-
-    if (!normalizedPerson)
+  for (const personId of entry.people ?? []) {
+    if (!personId)
       continue
 
-    const current = people.get(normalizedPerson)
-    people.set(normalizedPerson, {
-      name: normalizedPerson,
-      color: entry.personColors?.[normalizedPerson] ?? current?.color ?? DEFAULT_TAG_COLOR,
+    const current = people.get(personId)
+    people.set(personId, {
+      name: current?.name ?? personId,
+      color: entry.personColors?.[personId] ?? current?.color ?? DEFAULT_TAG_COLOR,
       pinned: current?.pinned === true,
       entries: addReference(current?.entries, entryReference),
     })
   }
 
-  for (const pointOfInterest of entry.pointsOfInterest ?? []) {
-    const normalizedPointOfInterest = normalizePointOfInterestTag(pointOfInterest)
-
-    if (!normalizedPointOfInterest)
+  for (const poiId of entry.pointsOfInterest ?? []) {
+    if (!poiId)
       continue
 
-    const current = pointsOfInterest.get(normalizedPointOfInterest)
-    pointsOfInterest.set(normalizedPointOfInterest, {
-      name: normalizedPointOfInterest,
-      color: entry.pointOfInterestColors?.[normalizedPointOfInterest] ?? current?.color ?? DEFAULT_TAG_COLOR,
+    const current = pointsOfInterest.get(poiId)
+    pointsOfInterest.set(poiId, {
+      name: current?.name ?? poiId,
+      color: entry.pointOfInterestColors?.[poiId] ?? current?.color ?? DEFAULT_TAG_COLOR,
       pinned: current?.pinned === true,
       entries: addReference(current?.entries, entryReference),
     })
@@ -741,6 +852,76 @@ function normalizeColorNameMap(value: unknown): Record<string, string> {
 
 function sortReferences(references: Set<string>): string[] {
   return Array.from(references).sort((a, b) => a.localeCompare(b))
+}
+
+export function updateDiaryCatalogNamedTagSection(
+  section: DiaryCatalog['activities'],
+  oldTag: TagId,
+  nextTag: TagId,
+  color: string,
+): DiaryCatalog['activities'] {
+  const nextSection = { ...section }
+  const oldEntry = nextSection[oldTag]
+  const targetEntry = nextSection[nextTag]
+  const isMerge = oldTag !== nextTag && targetEntry !== undefined
+
+  if (oldEntry) {
+    delete nextSection[oldTag]
+  }
+
+  const mergedEntries = isMerge
+    ? mergeReferences(oldEntry?.entries ?? [], targetEntry!.entries)
+    : (oldEntry?.entries ?? [])
+
+  const mergedPinned = (oldEntry?.pinned === true) || (isMerge && targetEntry!.pinned === true)
+  const resolvedName = oldEntry?.name ?? targetEntry?.name ?? nextTag
+
+  nextSection[nextTag] = {
+    name: resolvedName,
+    color: isMerge ? resolveTagColor(targetEntry!.color, color) : color,
+    pinned: mergedPinned,
+    entries: mergedEntries,
+  }
+
+  return nextSection
+}
+
+export function moveDiaryCatalogNamedTag(
+  sourceSection: DiaryCatalog['activities'],
+  targetSection: DiaryCatalog['activities'],
+  tag: TagId,
+  color: string,
+): {
+  sourceSection: DiaryCatalog['activities']
+  targetSection: DiaryCatalog['activities']
+} {
+  const sourceEntry = sourceSection[tag]
+  if (!sourceEntry) {
+    return { sourceSection, targetSection }
+  }
+
+  const nextSource = { ...sourceSection }
+  delete nextSource[tag]
+
+  const targetEntry = targetSection[tag]
+  const mergedEntries = targetEntry
+    ? mergeReferences(sourceEntry.entries, targetEntry.entries)
+    : sourceEntry.entries
+  const mergedPinned = sourceEntry.pinned === true || targetEntry?.pinned === true
+  const resolvedColor = targetEntry
+    ? resolveTagColor(targetEntry.color, color)
+    : color
+
+  const nextTarget = { ...targetSection }
+  const resolvedName = sourceEntry.name ?? targetEntry?.name ?? tag
+  nextTarget[tag] = {
+    name: resolvedName,
+    color: resolvedColor,
+    pinned: mergedPinned,
+    entries: mergedEntries,
+  }
+
+  return { sourceSection: nextSource, targetSection: nextTarget }
 }
 
 function removeEntryReferences<TValue extends { entries: string[] }>(

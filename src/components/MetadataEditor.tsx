@@ -19,6 +19,7 @@ type MetadataEditorProps = {
   onEntriesChange: (entries: DiaryEntry[]) => void
   onStatusChange: (message: string) => void
   onErrorLog: (log: string) => void
+  onNavigateDate?: (date: string) => void
 }
 
 export function MetadataEditor({
@@ -33,6 +34,7 @@ export function MetadataEditor({
   onEntriesChange,
   onStatusChange,
   onErrorLog,
+  onNavigateDate,
 }: MetadataEditorProps) {
   return (
     <section className="metadata-deck">
@@ -63,6 +65,8 @@ export function MetadataEditor({
           draft={draft}
           entries={entries}
           settings={settings}
+          diaryCatalog={diaryCatalog}
+          onNavigateDate={onNavigateDate}
           onSettingsChange={onSettingsChange}
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
@@ -73,6 +77,8 @@ export function MetadataEditor({
           draft={draft}
           entries={entries}
           settings={settings}
+          diaryCatalog={diaryCatalog}
+          onNavigateDate={onNavigateDate}
           onSettingsChange={onSettingsChange}
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
@@ -83,6 +89,8 @@ export function MetadataEditor({
           draft={draft}
           entries={entries}
           settings={settings}
+          diaryCatalog={diaryCatalog}
+          onNavigateDate={onNavigateDate}
           onSettingsChange={onSettingsChange}
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}

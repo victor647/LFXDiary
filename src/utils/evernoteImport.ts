@@ -201,11 +201,11 @@ export async function createDiaryEntryFromEvernoteImport(
     ...settings,
     activityTags: {
       ...settings.activityTags,
-      ...Object.fromEntries(tagsResult.addedTags.map((tag) => [tag, { color: DEFAULT_TAG_COLOR }])),
+      ...Object.fromEntries(tagsResult.addedTags.map((tag) => [tag, { name: tag, color: DEFAULT_TAG_COLOR }])),
     },
     peopleTags: {
       ...settings.peopleTags,
-      ...Object.fromEntries(peopleResult.addedPeople.map((person) => [person, { color: DEFAULT_TAG_COLOR }])),
+      ...Object.fromEntries(peopleResult.addedPeople.map((person) => [person, { name: person, color: DEFAULT_TAG_COLOR }])),
     },
   })
 
@@ -561,7 +561,7 @@ function getExistingActivityTags(entries: DiaryEntry[], settings: AppSettings): 
   for (const [name, tag] of Object.entries(settings.activityTags))
     tags.set(name, tag.color)
 
-  return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
 }
 
 function getExistingPeopleTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
@@ -573,7 +573,7 @@ function getExistingPeopleTags(entries: DiaryEntry[], settings: AppSettings): Re
   for (const [name, tag] of Object.entries(settings.peopleTags))
     tags.set(name, tag.color)
 
-  return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
 }
 
 function getExistingPointOfInterestTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
@@ -585,7 +585,7 @@ function getExistingPointOfInterestTags(entries: DiaryEntry[], settings: AppSett
   for (const [name, tag] of Object.entries(settings.pointOfInterestTags))
     tags.set(name, tag.color)
 
-  return Array.from(tags.entries()).map(([name, color]) => ({ name, color }))
+  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
 }
 
 function extractChinesePeopleFromEnglishText(content: string): string[] {

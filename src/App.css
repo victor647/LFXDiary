@@ -704,14 +704,14 @@ label {
   min-width: 140px;
   background: var(--button-primary, #1d3557);
   border-color: var(--accent, #1d3557);
-  color: #ffffff;
+  color: var(--button-primary-text, #ffffff);
   font-weight: 700;
 }
 
 .settings-save-button:hover {
   background: var(--button-primary-hover, #27496f);
   border-color: var(--button-primary-hover, #27496f);
-  color: #ffffff;
+  color: var(--button-primary-text, #ffffff);
 }
 
 .settings-file-button {
@@ -1056,11 +1056,10 @@ label {
 .tag-manager-chip-item {
   display: inline-flex;
   align-items: stretch;
-  max-width: 146px;
+  position: relative;
 }
 
 .tag-manager-chip-item > button:first-child {
-  max-width: 112px;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -1076,6 +1075,74 @@ label {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
   background: var(--card-bg, #ffffff);
+  color: var(--muted);
+}
+
+.tag-context-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 20px;
+  min-height: 26px;
+  flex: 0 0 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+  background: var(--card-bg, #ffffff);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tag-context-button:hover {
+  background: var(--hover, #f0f0f0);
+  color: var(--text, #333);
+}
+
+.tag-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 180px;
+  overflow: visible;
+}
+
+.tag-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text, #333);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tag-context-menu-item:hover {
+  background: var(--hover, #f0f0f0);
+}
+
+.tag-context-refs-panel {
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  background: var(--panel-bg, #fbfcfd);
+}
+
+.tag-context-ref-item {
+  padding-left: 24px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.tag-context-refs-empty {
+  padding: 8px 24px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1891,7 +1958,7 @@ label {
 .dialog-actions button:last-child {
   background: var(--button-primary, #1d3557);
   border-color: var(--accent, #1d3557);
-  color: #ffffff;
+  color: var(--button-primary-text, #ffffff);
 }
 
 .delete-entry-dialog .dialog-actions .danger-button {
@@ -2371,14 +2438,14 @@ label {
   min-height: 34px;
   background: var(--button-primary, #1d3557);
   border-color: var(--accent, #1d3557);
-  color: #ffffff;
+  color: var(--button-primary-text, #ffffff);
   font-weight: 700;
 }
 
 .entry-save-button:hover {
   background: var(--button-primary-hover, #27496f);
   border-color: var(--button-primary-hover, #27496f);
-  color: #ffffff;
+  color: var(--button-primary-text, #ffffff);
 }
 
 @media (max-width: 760px) {
