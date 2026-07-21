@@ -67,6 +67,22 @@ type SynologyPullResult =
   | { status: 'fulfilled'; mode: NasConnectionMode; entries: DiaryEntry[] }
   | { status: 'rejected'; mode: NasConnectionMode; error: unknown }
 
+// Module-level NAS session cache — reused across operations for the lifetime of the app
+let cachedNasSession: { baseUrl: string; username: string; session: SynologySession } | null = null
+
+export function clearNasSessionCache() {
+  cachedNasSession = null
+}
+
+async function getNasSession(baseUrl: string, username: string, password: string, options?: SynologyRequestOptions): Promise<SynologySession> {
+  if (cachedNasSession && cachedNasSession.baseUrl === baseUrl && cachedNasSession.username === username)
+    return cachedNasSession.session
+
+  const session = await loginToSynology(baseUrl, username, password, options)
+  cachedNasSession = { baseUrl, username, session }
+  return session
+}
+
 export class SynologySyncError extends Error {
   phase: string
   endpoint: string
@@ -95,9 +111,8 @@ export async function uploadEntriesToSynology(
   if (!entries.length)
     return
 
-  onProgress?.(0, 0, 'Logging into NAS...')
   const baseUrl = getSynologyApiBaseUrl(settings)
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword)
+  const session = await getNasSession(baseUrl, settings.nasUsername, settings.nasPassword)
 
   try {
     onProgress?.(0, entries.length, 'Uploading entry files...')
@@ -140,8 +155,7 @@ export async function uploadEntriesToSynology(
       'application/json;charset=utf-8',
     )
   } finally {
-    onProgress?.(0, 0, 'Logging out...')
-    await logoutFromSynology(baseUrl, session)
+    // Session is cached for reuse; don't logout
   }
 }
 
@@ -215,8 +229,7 @@ async function downloadDiaryCatalogFromSynologyMode(
 ): Promise<DiaryCatalog | null> {
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
-  onProgress?.(0, 0, 'Logging into NAS...')
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+  const session = await getNasSession(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
     onProgress?.(0, 1, 'Pulling catalog from NAS')
@@ -225,8 +238,7 @@ async function downloadDiaryCatalogFromSynologyMode(
 
     return catalog ?? null
   } finally {
-    onProgress?.(0, 0, 'Logging out...')
-    await logoutFromSynology(baseUrl, session, requestOptions)
+    // Session is cached for reuse; don't logout
   }
 }
 
@@ -237,8 +249,7 @@ async function uploadDiaryCatalogToSynologyMode(
 ) {
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
-  onProgress?.(0, 0, 'Logging into NAS...')
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+  const session = await getNasSession(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
     // Download remote catalog for merge, then backup
@@ -271,8 +282,7 @@ async function uploadDiaryCatalogToSynologyMode(
     )
     onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)
   } finally {
-    onProgress?.(0, 0, 'Logging out...')
-    await logoutFromSynology(baseUrl, session, requestOptions)
+    // Session is cached for reuse; don't logout
   }
 }
 
@@ -294,7 +304,7 @@ export async function pullEntryFromSynology(
 
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs: PULL_REQUEST_TIMEOUT_MS }
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+  const session = await getNasSession(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
     const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
@@ -305,7 +315,7 @@ export async function pullEntryFromSynology(
     onProgress?.(1, 1, result?.diaryDate ?? entry.diaryDate)
     return result
   } finally {
-    await logoutFromSynology(baseUrl, session, requestOptions)
+    // Session is cached for reuse; don't logout
   }
 }
 
@@ -365,8 +375,7 @@ async function downloadEntriesFromSynologyMode(
   const markdownFolders = notebookKeys?.length
     ? notebookKeys.map((notebookKey) => getNotebookMarkdownFolder(settings.markdownFolder, notebookKey))
     : [settings.markdownFolder]
-  options?.onProgress?.(0, 0, 'Logging into NAS...')
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+  const session = await getNasSession(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
     options?.onProgress?.(0, 0, 'Downloading catalog...')
@@ -392,8 +401,7 @@ async function downloadEntriesFromSynologyMode(
 
     return entries
   } finally {
-    options?.onProgress?.(0, 0, 'Logging out...')
-    await logoutFromSynology(baseUrl, session, requestOptions)
+    // Session is cached for reuse; don't logout
   }
 }
 

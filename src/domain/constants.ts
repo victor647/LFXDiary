@@ -2,7 +2,7 @@ import type { City, MoodScore, Period, TemperatureThresholds } from './types'
 
 export const STORAGE_KEY = 'lfx-diary.entries.v1'
 export const SETTINGS_KEY = 'lfx-diary.settings.v1'
-export const DEFAULT_TAG_COLOR = '#8e8e93'
+export const DEFAULT_TAG_COLOR = 'gray'
 export const DEFAULT_LAN_NAS_URL = 'https://192.168.0.2:5001/'
 export const DEFAULT_PUBLIC_NAS_URL = 'https://www.lafaxi647.cn:5001/'
 export const DEFAULT_MARKDOWN_FOLDER = '/Diary'
@@ -13,27 +13,53 @@ export const MAX_PEOPLE_PER_ENTRY = 12
 export const MAX_POINTS_OF_INTEREST_PER_ENTRY = 12
 
 export const TAG_COLOR_PALETTE = [
-  '#f97066',
-  '#fdb022',
-  '#facc15',
-  '#4ade80',
-  '#7dd3fc',
-  '#60a5fa',
-  '#c084fc',
-  '#f9a8d4',
-  '#8e8e93',
-]
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'cyan',
+  'blue',
+  'purple',
+  'pink',
+  'gray',
+] as const
+
+export type TagColorName = typeof TAG_COLOR_PALETTE[number]
+
+/** Color name → hex for CSS rendering */
+export const TAG_COLOR_HEX: Record<string, string> = {
+  red: '#f97066',
+  orange: '#fdb022',
+  yellow: '#facc15',
+  green: '#4ade80',
+  cyan: '#7dd3fc',
+  blue: '#60a5fa',
+  purple: '#c084fc',
+  pink: '#f9a8d4',
+  gray: '#8e8e93',
+}
+
+/** Hex → color name for migration */
+const HEX_TO_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(TAG_COLOR_HEX).map(([name, hex]) => [hex.toLowerCase(), name]),
+)
+
+/** Convert a color value (hex or name) to canonical name */
+export function normalizeColorName(color: string): string {
+  const lower = color.toLowerCase()
+  return HEX_TO_NAME[lower] ?? lower
+}
 
 export const DEFAULT_ACTIVITY_COLOR_GROUP_NAMES: Record<string, string> = {
-  '#f97066': 'Red',
-  '#fdb022': 'Orange',
-  '#facc15': 'Yellow',
-  '#4ade80': 'Green',
-  '#7dd3fc': 'Cyan',
-  '#60a5fa': 'Blue',
-  '#c084fc': 'Purple',
-  '#f9a8d4': 'Pink',
-  '#8e8e93': 'Gray',
+  red: 'Red',
+  orange: 'Orange',
+  yellow: 'Yellow',
+  green: 'Green',
+  cyan: 'Cyan',
+  blue: 'Blue',
+  purple: 'Purple',
+  pink: 'Pink',
+  gray: 'Gray',
 }
 
 export const DEFAULT_LOCATION_COLOR = TAG_COLOR_PALETTE[3]

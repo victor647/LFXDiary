@@ -603,7 +603,7 @@ function extractChinesePeopleFromEnglishText(content: string): string[] {
 function extractChinesePointOfInterestCandidates(content: string): string[] {
   const pointsOfInterest = new Set<string>()
 
-  for (const match of content.matchAll(/(?<![\u3400-\u9fff])[\u3400-\u9fff]{2,12}(?![\u3400-\u9fff])/g))
+  for (const match of content.matchAll(/(?<![\u3400-\u9fff])[\u3400-\u9fff]{4,12}(?![\u3400-\u9fff])/g))
     pointsOfInterest.add(match[0])
 
   return Array.from(pointsOfInterest)

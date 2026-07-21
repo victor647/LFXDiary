@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { type ChangeEvent, type KeyboardEvent, type UIEvent, useMemo, useRef, useState } from 'react'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
-import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
+import { getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../utils/colors'
 
 export type PersonMentionOption = {
   id: string
@@ -201,7 +201,7 @@ export function EntryEditor({
                       onClick={() => setExpandedMentionColor(group.color)}
                     >
                       <span className="activity-color-toggle-main">
-                        <span className="activity-color-dot" style={{ backgroundColor: group.color }} />
+                        <span className="activity-color-dot" style={{ backgroundColor: resolveColorHex(group.color) ?? group.color }} />
                         <span>{groupName}</span>
                       </span>
                       <ChevronRight size={14} />
@@ -214,7 +214,7 @@ export function EntryEditor({
                             type="button"
                             style={{
                               backgroundColor: getTagBackgroundColor(person.color),
-                              borderColor: person.color,
+                              borderColor: resolveColorHex(person.color) ?? person.color,
                               color: getTagTextColor(person.color),
                             }}
                             onMouseDown={(event) => event.preventDefault()}

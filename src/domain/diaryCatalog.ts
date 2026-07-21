@@ -8,7 +8,7 @@ export const YEAR_CATALOG_FILE_NAME = 'lfx-diary-year-catalog.json'
 export const WEATHER_CODES_FILE_NAME = 'weather-codes.json'
 
 type CatalogLocationMapValue = { city: City; color: string; pinned?: boolean; entries: Set<string> }
-type CatalogNamedTagMapValue = { color: string; pinned?: boolean; entries: Set<string> }
+type CatalogNamedTagMapValue = { name: string; color: string; pinned?: boolean; entries: Set<string> }
 
 export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   const locations = new Map<string, CatalogLocationMapValue>()
@@ -166,7 +166,7 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
 
   for (const [id, activity] of Object.entries(catalog.activities)) {
     activities.set(id, {
-      name: activity.name,
+      name: activity.name ?? id,
       color: activity.color,
       pinned: activity.pinned === true,
       entries: new Set(activity.entries),
@@ -175,7 +175,7 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
 
   for (const [id, person] of Object.entries(catalog.people)) {
     people.set(id, {
-      name: person.name,
+      name: person.name ?? id,
       color: person.color,
       pinned: person.pinned === true,
       entries: new Set(person.entries),
@@ -184,7 +184,7 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
 
   for (const [id, pointOfInterest] of Object.entries(catalog.pointsOfInterest)) {
     pointsOfInterest.set(id, {
-      name: pointOfInterest.name,
+      name: pointOfInterest.name ?? id,
       color: pointOfInterest.color,
       pinned: pointOfInterest.pinned === true,
       entries: new Set(pointOfInterest.entries),
@@ -247,9 +247,10 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
 
 export const UNWANTED_TAG_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const COORD_TAG_PATTERN = /^-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+$/
+const COORD_DASH_PATTERN = /^\d+-\d{1,3}\.\d+-\d{1,3}\.\d+$/
 
 function isUnwantedKey(key: string): boolean {
-  return UNWANTED_TAG_PATTERN.test(key) || COORD_TAG_PATTERN.test(key)
+  return UNWANTED_TAG_PATTERN.test(key) || COORD_TAG_PATTERN.test(key) || COORD_DASH_PATTERN.test(key)
 }
 
 /** Remove tag entries whose keys are UUIDs or coordinate strings */
@@ -341,8 +342,10 @@ export function stripGuidTagKeys(catalog: DiaryCatalog): DiaryCatalog {
   const nextActivities = filterGuids(catalog.activities)
   const nextPeople = filterGuids(catalog.people)
   const nextPointsOfInterest = filterGuids(catalog.pointsOfInterest)
+  const nextLocations = filterGuids(catalog.locations)
 
-  if (nextActivities === catalog.activities && nextPeople === catalog.people && nextPointsOfInterest === catalog.pointsOfInterest)
+  if (nextActivities === catalog.activities && nextPeople === catalog.people &&
+      nextPointsOfInterest === catalog.pointsOfInterest && nextLocations === catalog.locations)
     return catalog
 
   return {
@@ -351,12 +354,13 @@ export function stripGuidTagKeys(catalog: DiaryCatalog): DiaryCatalog {
     activities: nextActivities,
     people: nextPeople,
     pointsOfInterest: nextPointsOfInterest,
+    locations: nextLocations,
   }
 }
 
 /** Remove tags with zero entry references from the catalog */
 export function pruneEmptyCatalogTags(catalog: DiaryCatalog): DiaryCatalog {
-  const filterEmpty = <T extends { entries: string[] }>(section: Record<string, T>): Record<string, T> => {
+  const filterEmpty = <T extends { entries: string[]; pinned?: boolean }>(section: Record<string, T>): Record<string, T> => {
     const next: Record<string, T> = {}
     for (const [key, tag] of Object.entries(section)) {
       if (tag.entries.length > 0 || tag.pinned)
@@ -635,7 +639,7 @@ function convertV1CatalogToV2(incoming: DiaryCatalog, base: DiaryCatalog): Diary
 function buildNameToGuidMap(section: DiaryCatalog['activities']): Map<string, TagId> {
   const map = new Map<string, TagId>()
   for (const [guid, tag] of Object.entries(section)) {
-    const normalizedName = tag.name.trim().toLowerCase()
+    const normalizedName = (tag.name ?? '').trim().toLowerCase()
     if (normalizedName) map.set(normalizedName, guid)
   }
   return map

@@ -11,6 +11,37 @@ export function formatCityFullName(city: City): string {
     .join(', ')
 }
 
+/** Look up a city name by latitude/longitude using reverse geocoding */
+export async function searchCityByCoordinates(lat: number, lng: number): Promise<City | null> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10&language=en`,
+      { headers: { 'User-Agent': 'LFXDiary/1.0' } },
+    )
+    const data = await response.json() as {
+      name?: string
+      display_name?: string
+      address?: { city?: string; town?: string; village?: string; county?: string; state?: string; country?: string }
+    } | { error?: string }
+    if ('error' in data || !data.address) return null
+
+    const addr = data.address
+    const cityName = addr.city || addr.town || addr.village || addr.county || data.name || 'Unknown'
+    const country = addr.country ?? 'Unknown'
+
+    return {
+      id: `${cityName.toLowerCase().replace(/\s+/g, '-')}-${lat}-${lng}`,
+      name: cityName,
+      country,
+      latitude: lat,
+      longitude: lng,
+      timezone: 'auto',
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function searchCitiesByName(query: string, count = 8): Promise<City[]> {
   const trimmed = query.trim()
 

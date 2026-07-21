@@ -5,7 +5,7 @@ import { dispatchTagEvent, getWeatherResetPatch, type TagEvent } from '../../app
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
 import { locationTagManager } from '../../domain/tagModels'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry, RecentCity } from '../../domain/types'
-import { getTagBackgroundColor, getTagTextColor } from '../../utils/colors'
+import { getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../../utils/colors'
 import { formatCityDisplayName, formatCityFullName, searchCitiesByName } from '../../utils/city'
 import { getLocationNameKey } from '../../utils/diaryEntryHelpers'
 import { reorderByKey } from '../../utils/reorder'
@@ -396,7 +396,7 @@ export function LocationPanel({
                       onClick={() => setExpandedLocationColor(group.color)}
                     >
                       <span className="activity-color-toggle-main">
-                        <span className="activity-color-dot" style={{ backgroundColor: group.color }} />
+                        <span className="activity-color-dot" style={{ backgroundColor: resolveColorHex(group.color) ?? group.color }} />
                         <span>{groupName}</span>
                       </span>
                       <ChevronRight size={14} />
@@ -411,7 +411,7 @@ export function LocationPanel({
                             title={recentCity.city.name}
                             style={{
                               backgroundColor: getTagBackgroundColor(recentCity.color),
-                              borderColor: recentCity.color,
+                              borderColor: resolveColorHex(recentCity.color) ?? recentCity.color,
                               color: getTagTextColor(recentCity.color),
                             }}
                             onClick={() => addCity(recentCity.city, recentCity.color)}
@@ -448,7 +448,7 @@ export function LocationPanel({
                   className={selectedLocationColor === color ? 'tag-color-swatch selected' : 'tag-color-swatch'}
                   key={color}
                   type="button"
-                  style={{ backgroundColor: color }}
+                  style={{ backgroundColor: resolveColorHex(color) ?? color }}
                   title={`Location color ${color}`}
                   onClick={() => setSelectedLocationColor(color)}
                 />
@@ -508,7 +508,7 @@ export function LocationPanel({
                   className={editingLocationColor === color ? 'tag-color-swatch selected' : 'tag-color-swatch'}
                   key={color}
                   type="button"
-                  style={{ backgroundColor: color }}
+                  style={{ backgroundColor: resolveColorHex(color) ?? color }}
                   title={`Location color ${color}`}
                   onClick={() => setEditingLocationColor(color)}
                 />

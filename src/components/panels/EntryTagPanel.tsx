@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { dispatchTagEvent, type NamedTagManager, type TagEvent } from '../../application/tagEvents'
 import { createPortal } from 'react-dom'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../../domain/constants'
+import { resolveColorHex } from '../../utils/colors'
 import type { AppSettings, DiaryCatalog, DiaryEntry } from '../../domain/types'
 import { reorderByKey } from '../../utils/reorder'
 import {
@@ -389,7 +390,7 @@ export function EntryTagPanel({
                     onClick={() => setExpandedTagColor(group.color)}
                   >
                     <span className="activity-color-toggle-main">
-                      <span className="activity-color-dot" style={{ backgroundColor: group.color }} />
+                      <span className="activity-color-dot" style={{ backgroundColor: resolveColorHex(group.color) ?? group.color }} />
                       <span>{groupName}</span>
                     </span>
                     <ChevronRight size={14} />

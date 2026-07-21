@@ -28,7 +28,8 @@ import {
   cleanEntriesFromUnwantedTags,
 } from './domain/diaryCatalog'
 import { serializeDiaryEntryMarkdown } from './domain/diaryEntrySerialization'
-import type { AppSettings, DiaryCatalog, DiaryEntry, PendingPullReview, SyncLogLine, SyncProgress, SyncTarget, TagFilter } from './domain/types'
+import { getCityCatalogKey } from './domain/metadata/locationMetadata'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, PendingPullReview, SyncLogLine, SyncProgress, SyncTarget, TagFilter } from './domain/types'
 import { formatDiaryDate, getNotebookKey, getNotebookYear, toDateInputValue } from './utils/date'
 import {
   getEditedEntryCount,
@@ -59,6 +60,7 @@ import {
 import { downloadTextFile, getEntryMarkdownFileName } from './utils/files'
 import { loadSettings, normalizeSettings, saveSettings } from './utils/settings'
 import { formatSyncErrorLog } from './utils/syncErrorLog'
+import { searchCityByCoordinates } from './utils/city'
 import { getDecadeKey, getFilteredMonthEntryCounts, getTagFilterEntryReferences, getTagFilterOptions, sumMonthEntryCounts } from './utils/diaryFilterHelpers'
 import { getSyncTargetEntries, getSyncTargetLabel, getSyncTargetNotebookKeys, getSyncTargetPullSource } from './utils/syncTargetHelpers'
 import { importEvernoteFiles } from './application/importOperations'
@@ -80,7 +82,7 @@ export function DiaryApp() {
   const [syncErrorLog, setSyncErrorLog] = useState<string | null>(null)
   const [selectedNotebook, setSelectedNotebook] = useState<string | null>(initialDiaryLoad.monthKey)
   const [syncTarget, setSyncTarget] = useState<SyncTarget>(() => ({ kind: 'month', key: initialNotebookKey }))
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: DiaryEntry } | { x: number; y: number; kind: 'month'; key: string } | { x: number; y: number; kind: 'year'; year: string } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: DiaryEntry } | { x: number; y: number; kind: 'month'; key: string; isEmpty?: boolean } | { x: number; y: number; kind: 'year'; year: string } | null>(null)
   const [pendingDeleteEntry, setPendingDeleteEntry] = useState<DiaryEntry | null>(null)
   const [pendingForcePushTarget, setPendingForcePushTarget] = useState<SyncTarget | null>(null)
   const [pendingPullReview, setPendingPullReview] = useState<PendingPullReview | null>(null)
@@ -88,7 +90,11 @@ export function DiaryApp() {
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
   const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false)
   const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(new Set())
+  const [selectedMonthKeys, setSelectedMonthKeys] = useState<Set<string>>(new Set())
+  const [selectedYearKeys, setSelectedYearKeys] = useState<Set<string>>(new Set())
   const lastClickedEntryRef = useRef<string | null>(null)
+  const lastClickedMonthRef = useRef<string | null>(null)
+  const lastClickedYearRef = useRef<string | null>(null)
   const [expandedDecades, setExpandedDecades] = useState<Set<string>>(() => new Set([getDecadeKey(getNotebookYear(initialNotebookKey))]))
   const [expandedYears, setExpandedYears] = useState<Set<string>>(() => new Set([getNotebookYear(initialNotebookKey)]))
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => new Set(initialDiaryLoad.monthKey ? [initialDiaryLoad.monthKey] : []))
@@ -266,8 +272,67 @@ export function DiaryApp() {
 
     // Regular click: clear multi-selection, select entry
     setSelectedEntryIds(new Set())
+    setSelectedMonthKeys(new Set())
+    setSelectedYearKeys(new Set())
     lastClickedEntryRef.current = entry.id
     selectEntry(entry, notebookKey)
+  }
+
+  function handleMonthClick(monthKey: string, event: { ctrlKey: boolean; shiftKey: boolean }) {
+    if (event.ctrlKey) {
+      setSelectedMonthKeys((prev) => {
+        const next = new Set(prev)
+        if (next.has(monthKey)) next.delete(monthKey); else next.add(monthKey)
+        if (next.size > 0) lastClickedMonthRef.current = monthKey
+        return next
+      })
+      return
+    }
+
+    if (event.shiftKey && lastClickedMonthRef.current) {
+      const flatKeys = notebookGroups.flatMap((g) => g.months.map((m) => m.key))
+      const lastIdx = flatKeys.indexOf(lastClickedMonthRef.current)
+      const currentIdx = flatKeys.indexOf(monthKey)
+      if (lastIdx !== -1 && currentIdx !== -1) {
+        const [start, end] = lastIdx < currentIdx ? [lastIdx, currentIdx] : [currentIdx, lastIdx]
+        setSelectedMonthKeys(new Set(flatKeys.slice(start, end + 1)))
+      }
+      return
+    }
+
+    setSelectedMonthKeys(new Set())
+    setSelectedEntryIds(new Set())
+    lastClickedMonthRef.current = monthKey
+    toggleMonth(monthKey)
+  }
+
+  function handleYearClick(year: string, event: { ctrlKey: boolean; shiftKey: boolean }) {
+    if (event.ctrlKey) {
+      setSelectedYearKeys((prev) => {
+        const next = new Set(prev)
+        if (next.has(year)) next.delete(year); else next.add(year)
+        if (next.size > 0) lastClickedYearRef.current = year
+        return next
+      })
+      return
+    }
+
+    if (event.shiftKey && lastClickedYearRef.current) {
+      const flatYears = [...new Set(notebookGroups.map((g) => String(g.year)))]
+      const lastIdx = flatYears.indexOf(lastClickedYearRef.current)
+      const currentIdx = flatYears.indexOf(year)
+      if (lastIdx !== -1 && currentIdx !== -1) {
+        const [start, end] = lastIdx < currentIdx ? [lastIdx, currentIdx] : [currentIdx, lastIdx]
+        setSelectedYearKeys(new Set(flatYears.slice(start, end + 1)))
+      }
+      return
+    }
+
+    setSelectedYearKeys(new Set())
+    setSelectedMonthKeys(new Set())
+    setSelectedEntryIds(new Set())
+    lastClickedYearRef.current = year
+    toggleYear(year)
   }
 
   async function handleImportEvernoteFiles(files: File[]) {
@@ -327,17 +392,6 @@ export function DiaryApp() {
     return [...lines, { text: label, level }]
   }
 
-  async function pushSelectedEntries() {
-    const now = new Date().toISOString()
-    let nd = draft; let le = entries
-    if (isDraftDirty) { nd = getSavedDraftEntry(draft, now); le = upsertEntry(entries, nd); applyDraft(nd); applyEntries(le) }
-    const target = syncTarget
-    const targetLabel = getSyncTargetLabel(target)
-    const toPush = getSyncTargetEntries(loadAllStoredEntries(), target).filter(isEntryUnsynced)
-    revealSyncTarget(target)
-    if (!toPush.length) { setStatusMessage(`No unsynced entries in ${targetLabel}.`); setPendingForcePushTarget(target); return }
-    await doPush(toPush, targetLabel, nd, false)
-  }
   async function doPush(toPush: DiaryEntry[], targetLabel: string, nd: DiaryEntry, isForce: boolean) {
     const ns = normalizeSettings(settings)
     const adapter = await getDiarySyncAdapter(ns)
@@ -389,6 +443,7 @@ export function DiaryApp() {
 
   async function pushTargetEntries(target: SyncTarget) {
     setContextMenu(null)
+    if (selectedMonthKeys.size > 0 || selectedYearKeys.size > 0) { pushSelectedTargets(); return }
     const now = new Date().toISOString()
     let nd = draft; let le = entries
     if (isDraftDirty) { nd = getSavedDraftEntry(draft, now); le = upsertEntry(entries, nd); applyDraft(nd); applyEntries(le) }
@@ -400,6 +455,7 @@ export function DiaryApp() {
 
   function exportTargetEntries(target: SyncTarget) {
     setContextMenu(null)
+    if (selectedMonthKeys.size > 0 || selectedYearKeys.size > 0) { exportSelectedTargets(); return }
     const targetEntries = getSyncTargetEntries(loadAllStoredEntries(), target)
     for (const entry of targetEntries)
       downloadTextFile(getEntryMarkdownFileName(entry), serializeDiaryEntryMarkdown(entry), 'text/markdown')
@@ -409,19 +465,121 @@ export function DiaryApp() {
 
   function deleteTargetEntries(target: SyncTarget) {
     setContextMenu(null)
+    if (selectedMonthKeys.size > 0 || selectedYearKeys.size > 0) { deleteSelectedTargets(); return }
     const targetEntries = getSyncTargetEntries(loadAllStoredEntries(), target)
     if (!targetEntries.length) return
     const tl = getSyncTargetLabel(target)
     if (!window.confirm(`Delete all ${targetEntries.length} ${targetEntries.length === 1 ? 'entry' : 'entries'} in ${tl} from local storage?`)) return
     const targetIds = new Set(targetEntries.map((e) => e.id))
-    const next = entries.filter((item) => !targetIds.has(item.id))
-    applyEntries(next)
+    const allEntries = loadAllStoredEntries()
+    const next = allEntries.filter((item) => !targetIds.has(item.id))
+    const affectedKeys = new Set(loadedMonthKeys)
+    for (const e of targetEntries) affectedKeys.add(getNotebookKey(e.diaryDate))
+    applyEntries(next, affectedKeys)
     if (targetIds.has(draft.id)) { const nd = next[0] ?? makeBlankEntry(); applyDraft(nd); setSelectedNotebook(next[0] ? getNotebookKey(nd.diaryDate) : null) }
     setStatusMessage(`Deleted ${targetEntries.length} ${targetEntries.length === 1 ? 'entry' : 'entries'} from ${tl}`)
   }
 
+  function getSelectedTargetEntries(): DiaryEntry[] {
+    const targets: SyncTarget[] = [
+      ...Array.from(selectedMonthKeys).map((key) => ({ kind: 'month' as const, key })),
+      ...Array.from(selectedYearKeys).map((year) => ({ kind: 'year' as const, year })),
+    ]
+    if (!targets.length) return []
+    const seen = new Set<string>()
+    const result: DiaryEntry[] = []
+    const allEntries = loadAllStoredEntries()
+    for (const t of targets) {
+      for (const e of getSyncTargetEntries(allEntries, t)) {
+        if (!seen.has(e.id)) { seen.add(e.id); result.push(e) }
+      }
+    }
+    return result
+  }
+
+  async function pushSelectedTargets() {
+    setContextMenu(null)
+    const toPush = getSelectedTargetEntries().filter(isEntryUnsynced)
+    if (!toPush.length) { setStatusMessage('No unsynced entries in selection.'); return }
+    const now = new Date().toISOString()
+    let nd = draft; let le = entries
+    if (isDraftDirty) { nd = getSavedDraftEntry(draft, now); le = upsertEntry(entries, nd); applyDraft(nd); applyEntries(le) }
+    const count = selectedMonthKeys.size + selectedYearKeys.size
+    const label = `${count} selected ${count === 1 ? 'group' : 'groups'}`
+    await doPush(toPush, label, nd, false)
+  }
+
+  async function pullSelectedTargets() {
+    setContextMenu(null)
+    const targets: SyncTarget[] = [
+      ...Array.from(selectedMonthKeys).map((key) => ({ kind: 'month' as const, key })),
+      ...Array.from(selectedYearKeys).map((year) => ({ kind: 'year' as const, year })),
+    ]
+    if (!targets.length) return
+    const ns = normalizeSettings(settings)
+    const adapter = await getDiarySyncAdapter(ns)
+    const sl = adapter.label
+    const allTns = targets.flatMap((t) => getSyncTargetNotebookKeys(t))
+    const tns = [...new Set(allTns)]
+    let le = entries
+    if (isDraftDirty) { const sd = getSavedDraftEntry(draft, new Date().toISOString()); le = upsertEntry(entries, sd); applyDraft(sd); applyEntries(le) }
+    const count = selectedMonthKeys.size + selectedYearKeys.size
+    const label = `${count} selected ${count === 1 ? 'group' : 'groups'}`
+    const msg = `Pulling Markdown entries from ${label} on ${sl}...`
+    setStatusMessage(msg)
+    setSyncProgress({ target: sl, message: msg, logLines: [{ text: msg, level: 'info' }] })
+    try {
+      const pulled = await adapter.pullNotebookEntries(ns, tns, {
+        onProgress: (c, t, l) => setSyncProgress(prev => prev ? { target: sl, message: msg, current: c, total: t, logLines: appendLogLine(prev.logLines, l) } : null),
+      })
+      if (!pulled.length) { setStatusMessage(`No Markdown entries found in ${label} on ${sl}.`); setSyncProgress(null); return }
+      const sp = pulled.map((e) => ({ ...e, syncedAt: new Date().toISOString(), isEdited: false }))
+      const conflicts = getPullConflicts(le, sp)
+      if (conflicts.length) {
+        setSyncProgress(null)
+        const resolved = sp.filter((e) => !conflicts.some((c) => c.cloudEntry.diaryDate === e.diaryDate))
+        setPendingPullReview({ syncTarget: sl, target: { kind: 'month', key: tns[0] }, targetLabel: label, baseEntries: le, resolvedEntries: resolved, conflicts, index: 0 })
+        setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${sl}.`)
+        return
+      }
+      await finishPulled(sp, sl, le, { kind: 'month', key: tns[0] })
+      setSyncProgress(null)
+    } catch (error) {
+      const a = await getDiarySyncAdapter(ns)
+      setStatusMessage(error instanceof Error ? error.message : `${a.label} pull failed.`)
+      setSyncProgress(prev => prev ? { ...prev, logLines: [...(prev.logLines ?? []), { text: error instanceof Error ? error.message : `${a.label} pull failed.`, level: 'error' }], errorLog: formatSyncErrorLog(error, ns, undefined, getSyncTargetPullSource(a, ns, { kind: 'month', key: tns[0] })) } : null)
+    }
+  }
+
+  function exportSelectedTargets() {
+    setContextMenu(null)
+    const targetEntries = getSelectedTargetEntries()
+    for (const entry of targetEntries)
+      downloadTextFile(getEntryMarkdownFileName(entry), serializeDiaryEntryMarkdown(entry), 'text/markdown')
+    const count = selectedMonthKeys.size + selectedYearKeys.size
+    setStatusMessage(`Exported ${targetEntries.length} ${targetEntries.length === 1 ? 'entry' : 'entries'} from ${count} ${count === 1 ? 'group' : 'groups'}`)
+  }
+
+  function deleteSelectedTargets() {
+    setContextMenu(null)
+    const targetEntries = getSelectedTargetEntries()
+    if (!targetEntries.length) return
+    const count = selectedMonthKeys.size + selectedYearKeys.size
+    const label = `${count} ${count === 1 ? 'group' : 'groups'}`
+    if (!window.confirm(`Delete all ${targetEntries.length} ${targetEntries.length === 1 ? 'entry' : 'entries'} in ${label} from local storage?`)) return
+    const targetIds = new Set(targetEntries.map((e) => e.id))
+    const allEntries = loadAllStoredEntries()
+    const next = allEntries.filter((item) => !targetIds.has(item.id))
+    const affectedKeys = new Set(loadedMonthKeys)
+    for (const e of targetEntries) affectedKeys.add(getNotebookKey(e.diaryDate))
+    applyEntries(next, affectedKeys)
+    if (targetIds.has(draft.id)) { const nd = next[0] ?? makeBlankEntry(); applyDraft(nd); setSelectedNotebook(next[0] ? getNotebookKey(nd.diaryDate) : null) }
+    setStatusMessage(`Deleted ${targetEntries.length} ${targetEntries.length === 1 ? 'entry' : 'entries'} from ${label}`)
+  }
+
   async function pullTargetEntries(target: SyncTarget) {
     setContextMenu(null)
+    if (selectedMonthKeys.size > 0 || selectedYearKeys.size > 0) { void pullSelectedTargets(); return }
     const ns = normalizeSettings(settings)
     const adapter = await getDiarySyncAdapter(ns)
     const sl = adapter.label; const tl = getSyncTargetLabel(target); const tns = getSyncTargetNotebookKeys(target)
@@ -437,11 +595,8 @@ export function DiaryApp() {
           logLines: appendLogLine(prev.logLines, label),
         } : null),
       })
-      if (!pulled.length) { setStatusMessage(`No Markdown entries found in ${tl} on ${sl}.`); setSyncProgress(null); return }
-      const localDates = new Set(le.map((e) => e.diaryDate))
-      const newPulled = pulled.filter((e) => !localDates.has(e.diaryDate))
-      if (!newPulled.length) { setStatusMessage(`All entries in ${tl} already exist locally.`); setSyncProgress(null); return }
-      const sp = newPulled.map((e) => ({ ...e, syncedAt: new Date().toISOString(), isEdited: false }))
+      if (!pulled.length) { setStatusMessage(`No Markdown entries found in ${targetLabel} on ${sl}.`); setSyncProgress(null); return }
+      const sp = pulled.map((e) => ({ ...e, syncedAt: new Date().toISOString(), isEdited: false }))
       const conflicts = getPullConflicts(le, sp)
       if (conflicts.length) {
         setSyncProgress(null)
@@ -450,7 +605,7 @@ export function DiaryApp() {
         setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${sl}.`)
         return
       }
-      finishPulled(sp, sl, le, target)
+      await finishPulled(sp, sl, le, target)
       setSyncProgress(null)
     } catch (error) {
       const a = await getDiarySyncAdapter(ns)
@@ -464,50 +619,6 @@ export function DiaryApp() {
     }
   }
 
-  async function pullEntriesFromNas() {
-    const ns = normalizeSettings(settings)
-    const adapter = await getDiarySyncAdapter(ns)
-    const sl = adapter.label; const target = syncTarget
-    const tl = getSyncTargetLabel(target); const tns = getSyncTargetNotebookKeys(target)
-    let le = entries
-    if (isDraftDirty) { const sd = getSavedDraftEntry(draft, new Date().toISOString()); le = upsertEntry(entries, sd); applyDraft(sd); applyEntries(le) }
-    revealSyncTarget(target)
-    const msg = `Pulling Markdown entries from ${tl} on ${sl}...`
-    setStatusMessage(msg)
-    setSyncProgress({ target: sl, message: msg, logLines: [{ text: msg, level: 'info' }] })
-    try {
-      const pulled = await adapter.pullNotebookEntries(ns, tns, {
-        onProgress: (c, t, label) => setSyncProgress(prev => prev ? {
-          target: sl, message: msg, current: c, total: t,
-          logLines: appendLogLine(prev.logLines, label),
-        } : null),
-      })
-      if (!pulled.length) { setStatusMessage(`No Markdown entries found in ${tl} on ${sl}.`); setSyncProgress(null); return }
-      const localDates = new Set(le.map((e) => e.diaryDate))
-      const newPulled = pulled.filter((e) => !localDates.has(e.diaryDate))
-      if (!newPulled.length) { setStatusMessage(`All entries in ${tl} already exist locally.`); setSyncProgress(null); return }
-      const sp = newPulled.map((e) => ({ ...e, syncedAt: new Date().toISOString(), isEdited: false }))
-      const conflicts = getPullConflicts(le, sp)
-      if (conflicts.length) {
-        setSyncProgress(null)
-        const cds = new Set(conflicts.map((c) => c.cloudEntry.diaryDate))
-        setPendingPullReview({ syncTarget: sl, target, targetLabel: tl, baseEntries: le, resolvedEntries: sp.filter((e) => !cds.has(e.diaryDate)), conflicts, index: 0 })
-        setStatusMessage(`Resolve ${conflicts.length} pull ${conflicts.length === 1 ? 'conflict' : 'conflicts'} from ${sl}.`)
-        return
-      }
-      finishPulled(sp, sl, le, target)
-      setSyncProgress(null)
-    } catch (error) {
-      const a = await getDiarySyncAdapter(ns)
-      const errorMessage = error instanceof Error ? error.message : `${a.label} pull failed.`
-      setStatusMessage(errorMessage)
-      setSyncProgress(prev => prev ? {
-        ...prev,
-        logLines: [...(prev.logLines ?? []), { text: errorMessage, level: 'error' }],
-        errorLog: formatSyncErrorLog(error, ns, undefined, getSyncTargetPullSource(a, ns, syncTarget)),
-      } : null)
-    }
-  }
   async function pullSingleEntry(entry: DiaryEntry) {
     setContextMenu(null)
     const ns = normalizeSettings(settings); const adapter = await getDiarySyncAdapter(ns)
@@ -527,7 +638,7 @@ export function DiaryApp() {
       const sp = { ...pe, syncedAt: new Date().toISOString(), isEdited: false }
       const conflicts = getPullConflicts(le, [sp])
       if (conflicts.length) { setSyncProgress(null); setPendingPullReview({ syncTarget: sl, target: { kind: 'month', key: tn }, targetLabel: tn, baseEntries: le, resolvedEntries: [], conflicts, index: 0 }); setStatusMessage(`Resolve pull conflict for ${formatDiaryDate(entry.diaryDate)} from ${sl}.`); return }
-      finishPulled([sp], sl, le, { kind: 'month', key: tn })
+      await finishPulled([sp], sl, le, { kind: 'month', key: tn })
       setSyncProgress(null)
     } catch (error) {
       const a = await getDiarySyncAdapter(ns)
@@ -540,25 +651,106 @@ export function DiaryApp() {
       } : null)
     }
   }
-  function finishPulled(pulled: DiaryEntry[], st: string, base: DiaryEntry[], target: SyncTarget, resolvedCount = 0) {
+  async function finishPulled(pulled: DiaryEntry[], st: string, base: DiaryEntry[], target: SyncTarget, resolvedCount = 0) {
+    await resolvePulledLocations(pulled)
+
     const next = mergePulledEntries(base, pulled)
     const newest = [...pulled].sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))[0]
-    // Ensure tags from legacy pulled entries exist in catalog and settings
-    const enrichedCatalog = ensureTagsInCatalog(diaryCatalog, pulled)
-    if (enrichedCatalog !== diaryCatalog) {
-      applyDiaryCatalog(enrichedCatalog)
-      const ns = normalizeSettings(settings)
-      const nextSettings = applyDiaryCatalogToSettings(ns, enrichedCatalog)
-      if (nextSettings !== ns) {
-        setSettings(nextSettings)
-        saveSettings(nextSettings)
+    // Include pulled months in loaded keys so sidebar shows them immediately
+    const pulledMonthKeys = new Set(loadedMonthKeys)
+    for (const e of pulled) pulledMonthKeys.add(getNotebookKey(e.diaryDate))
+    setLoadedMonthKeys(pulledMonthKeys)
+    applyEntries(next, pulledMonthKeys)
+    setDiaryCatalog((cc) => {
+      let nc = ensureTagsInCatalog(cc, pulled)
+      nc = stripGuidTagKeys(nc)
+      if (nc !== cc) {
+        const ns = normalizeSettings(settings)
+        const nextSettings = applyDiaryCatalogToSettings(ns, nc)
+        if (nextSettings !== ns) {
+          setSettings(nextSettings)
+          saveSettings(nextSettings)
+        }
+        saveStoredDiaryCatalog(nc)
       }
-    }
-    applyEntries(next); applyDraft(newest); revealSyncTarget(target)
+      return nc
+    })
+    applyDraft(newest); revealSyncTarget(target)
     const ct = resolvedCount ? ` Resolved ${resolvedCount} ${resolvedCount === 1 ? 'conflict' : 'conflicts'}.` : ''
     setStatusMessage(`Pulled ${pulled.length} Markdown ${pulled.length === 1 ? 'entry' : 'entries'} from ${st}.${ct}`)
   }
-  function resolvePullConflict(useCloud: boolean) {
+
+  async function resolvePulledLocations(pulled: DiaryEntry[]) {
+    const coordLocPattern = /^(\d+)-(\d+\.\d+)-(\d+\.\d+)$/
+    const catalogByCoord = new Map<string, City>()
+    for (const loc of Object.values(diaryCatalog.locations)) {
+      if (loc.city.latitude && loc.city.longitude)
+        catalogByCoord.set(`${loc.city.latitude}-${loc.city.longitude}`, loc.city)
+    }
+
+    // Count total coordinate locations for progress
+    let totalCoords = 0
+    for (const entry of pulled)
+      for (const city of entry.cities)
+        if ((city.name || city.id).match(coordLocPattern)) totalCoords++
+
+    let resolvedCount = 0
+    for (const entry of pulled) {
+      const resolvedCities: City[] = []
+      const seenCityKeys = new Set<string>()
+      for (const city of entry.cities) {
+        const coordMatch = (city.name || city.id).match(coordLocPattern)
+        if (!coordMatch) {
+          const key = getCityCatalogKey(city)
+          if (!seenCityKeys.has(key)) {
+            resolvedCities.push(city)
+            seenCityKeys.add(key)
+          }
+          continue
+        }
+        const [, geonameId, latStr, lngStr] = coordMatch
+        const lat = Number.parseFloat(latStr)
+        const lng = Number.parseFloat(lngStr)
+        const coordKey = `${lat}-${lng}`
+        // Try existing catalog city by coordinates
+        const existing = catalogByCoord.get(coordKey)
+        if (existing) {
+          const key = getCityCatalogKey(existing)
+          if (!seenCityKeys.has(key)) {
+            resolvedCities.push(existing)
+            seenCityKeys.add(key)
+          }
+          resolvedCount++
+          continue
+        }
+        // Try reverse geocoding (rate-limited to 1 req/s for Nominatim)
+        try {
+          if (resolvedCount > 0) await new Promise((r) => setTimeout(r, 1100))
+          const resolved = await searchCityByCoordinates(lat, lng)
+          resolvedCount++
+          setSyncProgress((prev) => prev ? {
+            ...prev,
+            message: `Resolving locations (${resolvedCount}/${totalCoords})...`,
+            logLines: appendLogLine(prev.logLines, resolved ? `Resolved: ${resolved.name}` : `No match for ${geonameId}, using ID`),
+          } : null)
+          if (resolved) {
+            const key = getCityCatalogKey(resolved)
+            if (!seenCityKeys.has(key)) {
+              resolvedCities.push(resolved)
+              seenCityKeys.add(key)
+            }
+            continue
+          }
+        } catch {
+          resolvedCount++
+          console.warn(`Reverse geocoding failed for ${lat},${lng} (ID: ${geonameId})`)
+        }
+        // Geocoding failed — drop this location rather than creating a numeric ID tag
+      }
+      entry.cities = resolvedCities
+    }
+  }
+  async function resolvePullConflict(useCloud: boolean) {
     if (!pendingPullReview) return
     const conflict = pendingPullReview.conflicts[pendingPullReview.index]
     const selected = useCloud ? conflict.cloudEntry : conflict.localEntry
@@ -566,7 +758,7 @@ export function DiaryApp() {
     const ni = pendingPullReview.index + 1
     if (ni < pendingPullReview.conflicts.length) { setPendingPullReview({ ...pendingPullReview, resolvedEntries: resolved, index: ni }); return }
     setPendingPullReview(null)
-    finishPulled(resolved, pendingPullReview.syncTarget, pendingPullReview.baseEntries, pendingPullReview.target, pendingPullReview.conflicts.length)
+    await finishPulled(resolved, pendingPullReview.syncTarget, pendingPullReview.baseEntries, pendingPullReview.target, pendingPullReview.conflicts.length)
   }
 
   function exportEntry(entry: DiaryEntry) { downloadTextFile(getEntryMarkdownFileName(entry), serializeDiaryEntryMarkdown(entry), 'text/markdown'); setContextMenu(null); setStatusMessage(`Exported ${formatDiaryDate(entry.diaryDate)}`) }
@@ -588,7 +780,7 @@ export function DiaryApp() {
     const catalogTagCount = countCatalogTags(diaryCatalog) - countCatalogTags(catalogCleaned)
     setSyncProgress((prev) => prev ? {
       ...prev, current: 1, total: 3,
-      logLines: [...prev.logLines, { text: `Removed ${catalogTagCount} unwanted tags from catalog.`, level: 'info' }],
+      logLines: [...(prev.logLines ?? []), { text: `Removed ${catalogTagCount} unwanted tags from catalog.`, level: 'info' }],
     } : null)
 
     // Step 2: Clean all stored entries (not just loaded ones)
@@ -599,7 +791,7 @@ export function DiaryApp() {
     saveLoadedEntries(cleanedEntries, new Set(cleanedEntries.map((e) => getNotebookKey(e.diaryDate))))
     setSyncProgress((prev) => prev ? {
       ...prev, current: 2, total: 3,
-      logLines: [...prev.logLines, { text: `Removed ${totalEntryRefs} unwanted tag references from ${cleanedEntries.filter((e) => e.isEdited).length} entries.`, level: 'info' }],
+      logLines: [...(prev.logLines ?? []), { text: `Removed ${totalEntryRefs} unwanted tag references from ${cleanedEntries.filter((e) => e.isEdited).length} entries.`, level: 'info' }],
     } : null)
 
     // Step 3: Apply changes
@@ -616,7 +808,7 @@ export function DiaryApp() {
 
     setSyncProgress((prev) => prev ? {
       ...prev, current: 3, total: 3,
-      logLines: [...prev.logLines, { text: changed ? 'Clean complete.' : 'Nothing to clean.', level: 'info' }],
+      logLines: [...(prev.logLines ?? []), { text: changed ? 'Clean complete.' : 'Nothing to clean.', level: 'info' }],
       message: finalMsg,
     } : null)
     setStatusMessage(finalMsg)
@@ -743,13 +935,14 @@ export function DiaryApp() {
         onNewEntry={startNewEntry} onImportEvernoteFiles={(f) => { void handleImportEvernoteFiles(f) }}
         onOpenCatalog={() => setCurrentPage('catalog')} onOpenSettings={() => setCurrentPage('settings')}
         onSearchChange={setSearchQuery} onTagFilterChange={setTagFilter} onSelectEntry={handleEntryClick}
-        onToggleDecade={toggleDecade} onToggleYear={toggleYear} onToggleMonth={toggleMonth}
+        onToggleDecade={toggleDecade} onSelectYear={handleYearClick} onSelectMonth={handleMonthClick}
         onOpenContextMenu={setContextMenu} onCloseContextMenu={() => setContextMenu(null)}
         onExportEntry={exportEntry} onPullEntry={(e) => { void pullSingleEntry(e) }} onPushEntry={(e) => { void pushSingleEntry(e) }}
         onDeleteEntry={requestDeleteEntry}
         onPushTarget={(t) => { void pushTargetEntries(t) }} onPullTarget={(t) => { void pullTargetEntries(t) }}
         onExportTarget={exportTargetEntries} onDeleteTarget={deleteTargetEntries}
-        selectedEntryIds={selectedEntryIds} />
+        selectedEntryIds={selectedEntryIds}
+        selectedMonthKeys={selectedMonthKeys} selectedYearKeys={selectedYearKeys} />
       <section className="editor">
         {currentPage === 'settings' || currentPage === 'catalog' ? (
           <SettingsPage variant={currentPage} settings={settings} draft={draft} entries={entries} diaryCatalog={diaryCatalog}

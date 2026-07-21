@@ -159,18 +159,21 @@ export type DiaryCatalog = {
   }>
   /** Tag name → catalog entry */
   activities: Record<TagId, {
+    name?: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
   /** Tag name → catalog entry */
   people: Record<TagId, {
+    name?: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
   /** Tag name → catalog entry */
   pointsOfInterest: Record<TagId, {
+    name?: string
     color: string
     pinned?: boolean
     entries: string[]

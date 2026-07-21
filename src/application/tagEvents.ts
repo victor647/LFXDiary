@@ -14,7 +14,7 @@ export type TagEventState = {
   settings: AppSettings
   draft: DiaryEntry
   entries: DiaryEntry[]
-  diaryCatalog?: DiaryCatalog
+  diaryCatalog: DiaryCatalog
 }
 
 export type TagEvent =

@@ -1,7 +1,7 @@
 import { Plus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_ACTIVITY_COLOR_GROUP_NAMES, DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../domain/constants'
-import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
+import { getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../utils/colors'
 
 type ActivityChipButtonProps = {
   name: string
@@ -44,7 +44,7 @@ export function ActivityChipButton({ name, color, count, onClick, onContextMenu 
       title={typeof count === 'number' ? `${name}: ${count} ${count === 1 ? 'entry' : 'entries'}` : name}
       style={{
         backgroundColor: getTagBackgroundColor(color),
-        borderColor: color,
+        borderColor: resolveColorHex(color) ?? color,
         color: getTagTextColor(color),
       }}
       onClick={onClick}
@@ -289,7 +289,7 @@ function ActivityColorPalette({
           className={color === paletteColor ? 'tag-color-swatch selected' : 'tag-color-swatch'}
           key={paletteColor}
           type="button"
-          style={{ backgroundColor: paletteColor }}
+          style={{ backgroundColor: resolveColorHex(paletteColor) ?? paletteColor }}
           title={colorNames?.[paletteColor] || DEFAULT_ACTIVITY_COLOR_GROUP_NAMES[paletteColor] || paletteColor}
           onClick={() => onColorChange(paletteColor)}
         />

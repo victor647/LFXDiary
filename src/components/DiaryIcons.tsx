@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { DEFAULT_TAG_COLOR, MAX_ACTIVITIES_PER_ENTRY } from '../domain/constants'
 import type { DiaryEntry, MoodScore, Period, WeatherSample } from '../domain/types'
-import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
+import { getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../utils/colors'
 import { formatCityDisplayName } from '../utils/city'
 
 export function DiaryWeatherIcon({ entry }: { entry: DiaryEntry }) {
@@ -101,7 +101,7 @@ export function EntryTagDots({ entry }: { entry: DiaryEntry }) {
             key={tag}
             style={{
               backgroundColor: getTagBackgroundColor(color),
-              borderColor: color,
+              borderColor: resolveColorHex(color) ?? color,
               color: getTagTextColor(color),
             }}
           >

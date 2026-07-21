@@ -44,7 +44,7 @@ import type { AppSettings, City, DiaryCatalog, DiaryEntry } from '../domain/type
 import { getCityCatalogKey } from '../domain/metadata/locationMetadata'
 import { toDateInputValue } from '../utils/date'
 import { formatCityFullName, searchCitiesByName } from '../utils/city'
-import { getTagBackgroundColor, getTagTextColor } from '../utils/colors'
+import { getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../utils/colors'
 import {
   getActiveNasUrl,
   getTemperatureColorBands,
@@ -978,13 +978,13 @@ export function SettingsPage({
               <div className="temperature-settings-row" key={band.id}>
                 <span
                   className="tag-manager-swatch"
-                  style={{ backgroundColor: band.color }}
+                  style={{ backgroundColor: resolveColorHex(band.color) ?? band.color }}
                   title={`Temperature color ${band.color}`}
                 />
                 <span className="tag-manager-name">{band.label}</span>
                 <span
                   className="temperature-settings-preview"
-                  style={{ backgroundColor: `${band.color}1f`, borderColor: band.color }}
+                  style={{ backgroundColor: `${resolveColorHex(band.color) ?? band.color}1f`, borderColor: resolveColorHex(band.color) ?? band.color }}
                 />
                 {index < temperatureColorBands.length - 1 ? (
                   <label className="temperature-threshold-input">
@@ -1283,7 +1283,7 @@ function TagManagerList<TTag extends DiaryTag>({
                     </button>
                     <span
                       className="tag-manager-swatch"
-                      style={{ backgroundColor: group.color }}
+                      style={{ backgroundColor: resolveColorHex(group.color) ?? group.color }}
                       title={group.name}
                     />
                     <input
@@ -1315,7 +1315,7 @@ function TagManagerList<TTag extends DiaryTag>({
                     style={tag.pinned
                       ? {
                           backgroundColor: getTagBackgroundColor(tag.color),
-                          borderColor: tag.color,
+                          borderColor: resolveColorHex(tag.color) ?? tag.color,
                           color: getTagTextColor(tag.color),
                         }
                       : undefined}

@@ -10,6 +10,7 @@ import {
   SETTINGS_KEY,
   TAG_COLOR_PALETTE,
   TEMPERATURE_COLOR_BAND_DEFINITIONS,
+  normalizeColorName,
 } from '../domain/constants'
 import { mirrorToFiles } from './storage'
 import type { AppSettings, TemperatureColorBand, TemperatureThresholds } from '../domain/types'
@@ -50,6 +51,7 @@ export const defaultSettings: AppSettings = {
 export function loadSettings(): AppSettings {
   // Run GUID migration if needed (safe to call multiple times)
   migrateGuidsToNames()
+  migrateHexToColorNames()
 
   const raw = localStorage.getItem(SETTINGS_KEY)
 
@@ -232,7 +234,7 @@ function normalizeActivityTags(tags: AppSettings['activityTags']): AppSettings['
       continue
 
     normalized[id] = {
-      color: tag.color || DEFAULT_TAG_COLOR,
+      color: normalizeColorName(tag.color) || DEFAULT_TAG_COLOR,
       pinned: tag.pinned === true,
     }
   }
@@ -390,4 +392,94 @@ export function migrateGuidsToNames(): void {
   }
 
   localStorage.setItem(NAME_MIGRATION_KEY, '1')
+}
+
+const COLOR_MIGRATION_KEY = 'lfx-diary.color-name-migration.v1'
+
+function normalizeColorInRecord(record: Record<string, { color: string; pinned?: boolean }>): boolean {
+  let changed = false
+  for (const [key, tag] of Object.entries(record)) {
+    const normalized = normalizeColorName(tag.color)
+    if (normalized !== tag.color) {
+      record[key] = { ...tag, color: normalized }
+      changed = true
+    }
+  }
+  return changed
+}
+
+/** One-time migration: convert hex colors to color names */
+function migrateHexToColorNames(): void {
+  if (localStorage.getItem(COLOR_MIGRATION_KEY)) return
+
+  // Migrate settings
+  const settingsRaw = localStorage.getItem('lfx-diary.settings.v1')
+  if (settingsRaw) {
+    try {
+      const s = JSON.parse(settingsRaw)
+      let changed = false
+      for (const section of ['activityTags', 'peopleTags', 'pointOfInterestTags'] as const) {
+        if (s[section] && normalizeColorInRecord(s[section] as Record<string, { color: string }>))
+          changed = true
+      }
+      if (changed)
+        localStorage.setItem('lfx-diary.settings.v1', JSON.stringify(s))
+    } catch { /* ignore */ }
+  }
+
+  // Migrate entries
+  const entriesRaw = localStorage.getItem('lfx-diary.entries.v1')
+  if (entriesRaw) {
+    try {
+      const monthData = JSON.parse(entriesRaw)
+      let changed = false
+      for (const month of Object.values(monthData) as { entries?: unknown[] }[]) {
+        if (!Array.isArray(month?.entries)) continue
+        for (const entry of month.entries as Record<string, unknown>[]) {
+          for (const field of ['tagColors', 'personColors', 'pointOfInterestColors', 'locationColors'] as const) {
+            const colors = entry[field] as Record<string, string> | undefined
+            if (colors) {
+              for (const key of Object.keys(colors)) {
+                const normalized = normalizeColorName(colors[key])
+                if (normalized !== colors[key]) {
+                  colors[key] = normalized
+                  changed = true
+                }
+              }
+            }
+          }
+        }
+      }
+      if (changed)
+        localStorage.setItem('lfx-diary.entries.v1', JSON.stringify(monthData))
+    } catch { /* ignore */ }
+  }
+
+  // Migrate catalog
+  const catalogRaw = localStorage.getItem('lfx-diary.catalog.v1')
+  if (catalogRaw) {
+    try {
+      const c = JSON.parse(catalogRaw)
+      let changed = false
+      for (const section of ['activities', 'people', 'pointsOfInterest'] as const) {
+        if (c[section] && normalizeColorInRecord(c[section] as Record<string, { color: string }>))
+          changed = true
+      }
+      // Also normalize location colors
+      if (c.locations) {
+        for (const key of Object.keys(c.locations as Record<string, { color: string }>)) {
+          const loc = (c.locations as Record<string, { color: string }>)[key]
+          const normalized = normalizeColorName(loc.color)
+          if (normalized !== loc.color) {
+            loc.color = normalized
+            changed = true
+          }
+        }
+      }
+      if (changed)
+        localStorage.setItem('lfx-diary.catalog.v1', JSON.stringify(c))
+    } catch { /* ignore */ }
+  }
+
+  localStorage.setItem(COLOR_MIGRATION_KEY, '1')
 }

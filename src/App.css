@@ -505,6 +505,15 @@ label {
   color: #b45309;
 }
 
+.month-tab.month-empty {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.month-tab.month-empty .month-count {
+  color: var(--muted);
+}
+
 .entry-date {
   grid-column: 2;
   align-self: end;

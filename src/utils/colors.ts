@@ -1,4 +1,12 @@
 import type { MoodScore } from '../domain/types'
+import { TAG_COLOR_HEX } from '../domain/constants'
+
+/** Resolve a color name or hex to its hex value, or null if unrecognized */
+export function resolveColorHex(color: string): string | null {
+  if (/^#[0-9a-fA-F]{6}$/.test(color))
+    return color
+  return TAG_COLOR_HEX[color.toLowerCase()] ?? null
+}
 
 export function getMoodBackgroundColor(mood: MoodScore): string {
   const averageMood = (mood.morning + mood.afternoon + mood.evening) / 3
@@ -23,15 +31,19 @@ export function getMoodAccentColor(score: number): string {
 }
 
 export function getTagBackgroundColor(color: string): string {
-  if (!/^#[0-9a-fA-F]{6}$/.test(color))
+  const hex = resolveColorHex(color)
+  if (!hex)
     return '#edf6f9'
 
-  return `${color}1f`
+  return `${hex}1f`
 }
 
 export function getTagTextColor(color: string): string {
-  const rgb = parseHexColor(color)
+  const hex = resolveColorHex(color)
+  if (!hex)
+    return '#334155'
 
+  const rgb = parseHexColor(hex)
   if (!rgb)
     return '#334155'
 

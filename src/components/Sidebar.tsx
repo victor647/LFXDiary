@@ -17,14 +17,14 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiaryEntry, NotebookGroup, SyncTarget, TagFilter, TagFilterKind, TagFilterOption } from '../domain/types'
-import { getMoodBackgroundColor, getTagBackgroundColor, getTagTextColor } from '../utils/colors'
+import { getMoodBackgroundColor, getTagBackgroundColor, getTagTextColor, resolveColorHex } from '../utils/colors'
 import { formatDiaryDate } from '../utils/date'
 import { isEntryUnsynced } from '../utils/diaryEntryHelpers'
 import { DiaryWeatherIcon, EntryTagDots } from './DiaryIcons'
 
 type SidebarContextMenu =
   | { x: number; y: number; entry: DiaryEntry }
-  | { x: number; y: number; kind: 'month'; key: string }
+  | { x: number; y: number; kind: 'month'; key: string; isEmpty?: boolean }
   | { x: number; y: number; kind: 'year'; year: string }
 
 type SidebarSyncTarget =
@@ -60,6 +60,8 @@ type SidebarProps = {
   isCatalogOpen: boolean
   isSettingsOpen: boolean
   selectedEntryIds: Set<string>
+  selectedMonthKeys: Set<string>
+  selectedYearKeys: Set<string>
   onNewEntry: () => void
   onImportEvernoteFiles: (files: File[]) => void
   onOpenCatalog: () => void
@@ -68,8 +70,8 @@ type SidebarProps = {
   onTagFilterChange: (filter: TagFilter) => void
   onSelectEntry: (entry: DiaryEntry, notebookKey: string, event: { ctrlKey: boolean; shiftKey: boolean }) => void
   onToggleDecade: (decade: string) => void
-  onToggleYear: (year: string) => void
-  onToggleMonth: (monthKey: string) => void
+  onSelectYear: (year: string, event: { ctrlKey: boolean; shiftKey: boolean }) => void
+  onSelectMonth: (monthKey: string, event: { ctrlKey: boolean; shiftKey: boolean }) => void
   onOpenContextMenu: (menu: SidebarContextMenu) => void
   onCloseContextMenu: () => void
   onExportEntry: (entry: DiaryEntry) => void
@@ -102,6 +104,8 @@ export function Sidebar({
   isCatalogOpen,
   isSettingsOpen,
   selectedEntryIds,
+  selectedMonthKeys,
+  selectedYearKeys,
   onNewEntry,
   onImportEvernoteFiles,
   onOpenCatalog,
@@ -110,8 +114,8 @@ export function Sidebar({
   onTagFilterChange,
   onSelectEntry,
   onToggleDecade,
-  onToggleYear,
-  onToggleMonth,
+  onSelectYear,
+  onSelectMonth,
   onOpenContextMenu,
   onCloseContextMenu,
   onExportEntry,
@@ -316,7 +320,7 @@ export function Sidebar({
                           onClick={() => applyTagColor(activeKindMenu.value, color)}
                         >
                           <span className="activity-color-toggle-main">
-                            <span className="activity-color-dot" style={{ backgroundColor: color }} />
+                            <span className="activity-color-dot" style={{ backgroundColor: resolveColorHex(color) ?? color }} />
                             <span>{label}</span>
                           </span>
                           <ChevronRight size={14} />
@@ -331,7 +335,7 @@ export function Sidebar({
                                 title={option.name}
                                 style={{
                                   backgroundColor: getTagBackgroundColor(option.color),
-                                  borderColor: option.color,
+                                  borderColor: resolveColorHex(option.color) ?? option.color,
                                   color: getTagTextColor(option.color),
                                 }}
                                 onClick={() => applyConcreteTag(option)}
@@ -421,13 +425,14 @@ export function Sidebar({
                   {decadeGroup.groups.map((group) => {
                     const isExpanded = expandedYears.has(group.year)
                     const isSelectedYear = syncTarget.kind === 'year' && syncTarget.year === group.year
+                    const isMultiSelectedYear = selectedYearKeys.has(String(group.year))
 
                     return (
                       <div className="year-group" key={group.year}>
                         <button
-                          className={isSelectedYear ? 'year-toggle selected' : 'year-toggle'}
+                          className={isSelectedYear || isMultiSelectedYear ? 'year-toggle selected' : 'year-toggle'}
                           type="button"
-                          onClick={() => onToggleYear(group.year)}
+                          onClick={(e) => onSelectYear(group.year, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })}
                           onContextMenu={(event) => {
                             event.preventDefault()
                             onOpenContextMenu({ x: event.clientX, y: event.clientY, kind: 'year', year: group.year })
@@ -442,15 +447,17 @@ export function Sidebar({
                           <div className="month-list">
                             {group.months.map((month) => {
                               const unsyncedCount = month.isLoaded ? month.entries.filter(isEntryUnsynced).length : 0
+                              const isMultiSelected = selectedMonthKeys.has(month.key)
                               const isSelectedMonth = syncTarget.kind === 'month' && syncTarget.key === month.key
+                              const isEmpty = month.entryCount === 0
 
                               return (
-                                <div className={isSelectedMonth ? 'month-group selected' : 'month-group'} key={month.key}>
-                                  <button className="month-tab" type="button"
-                                    onClick={() => onToggleMonth(month.key)}
+                                <div className={isSelectedMonth || isMultiSelected ? 'month-group selected' : 'month-group'} key={month.key}>
+                                  <button className={`month-tab${isEmpty ? ' month-empty' : ''}`} type="button"
+                                    onClick={(e) => onSelectMonth(month.key, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })}
                                     onContextMenu={(event) => {
                                       event.preventDefault()
-                                      onOpenContextMenu({ x: event.clientX, y: event.clientY, kind: 'month', key: month.key })
+                                      onOpenContextMenu({ x: event.clientX, y: event.clientY, kind: 'month', key: month.key, isEmpty })
                                     }}
                                   >
                                     {expandedMonths.has(month.key) ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -527,24 +534,33 @@ export function Sidebar({
               </button>
             </>
           ) : contextMenu.kind === 'month' ? (
-            <>
-              <button type="button" onClick={() => onPushTarget({ kind: 'month', key: contextMenu.key })}>
-                <Upload size={14} />
-                Push Month
-              </button>
-              <button type="button" onClick={() => onPullTarget({ kind: 'month', key: contextMenu.key })}>
-                <Download size={14} />
-                Pull Month
-              </button>
-              <button type="button" onClick={() => onExportTarget({ kind: 'month', key: contextMenu.key })}>
-                <Download size={14} />
-                Export Month
-              </button>
-              <button className="danger-menu-item" type="button" onClick={() => onDeleteTarget({ kind: 'month', key: contextMenu.key })}>
-                <Trash2 size={14} />
-                Delete Month
-              </button>
-            </>
+            contextMenu.isEmpty ? (
+              <>
+                <button type="button" onClick={() => onPullTarget({ kind: 'month', key: contextMenu.key })}>
+                  <Download size={14} />
+                  Pull Month
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => onPushTarget({ kind: 'month', key: contextMenu.key })}>
+                  <Upload size={14} />
+                  Push Month
+                </button>
+                <button type="button" onClick={() => onPullTarget({ kind: 'month', key: contextMenu.key })}>
+                  <Download size={14} />
+                  Pull Month
+                </button>
+                <button type="button" onClick={() => onExportTarget({ kind: 'month', key: contextMenu.key })}>
+                  <Download size={14} />
+                  Export Month
+                </button>
+                <button className="danger-menu-item" type="button" onClick={() => onDeleteTarget({ kind: 'month', key: contextMenu.key })}>
+                  <Trash2 size={14} />
+                  Delete Month
+                </button>
+              </>
+            )
           ) : (
             <>
               <button type="button" onClick={() => onPushTarget({ kind: 'year', year: contextMenu.year })}>
@@ -571,6 +587,12 @@ export function Sidebar({
       <div className="sync-panel">
         {selectedEntryIds.size > 0 && (
           <p className="multi-select-count">{selectedEntryIds.size} selected</p>
+        )}
+        {selectedMonthKeys.size > 0 && (
+          <p className="multi-select-count">{selectedMonthKeys.size} month{selectedMonthKeys.size !== 1 ? 's' : ''} selected</p>
+        )}
+        {selectedYearKeys.size > 0 && (
+          <p className="multi-select-count">{selectedYearKeys.size} year{selectedYearKeys.size !== 1 ? 's' : ''} selected</p>
         )}
         <p>{statusMessage}</p>
       </div>

@@ -278,9 +278,9 @@ function getCatalogEntryMetadata(catalog: DiaryCatalog | undefined, entryReferen
 
   return {
     cities,
-    tags: hasCatalogReference ? tags : undefined,
-    people: hasCatalogReference ? people : undefined,
-    pointsOfInterest: hasCatalogReference ? pointsOfInterest : undefined,
+    tags: hasCatalogReference ? (tags.length ? tags : undefined) : undefined,
+    people: hasCatalogReference ? (people.length ? people : undefined) : undefined,
+    pointsOfInterest: hasCatalogReference ? (pointsOfInterest.length ? pointsOfInterest : undefined) : undefined,
   }
 }
 

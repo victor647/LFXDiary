@@ -267,6 +267,23 @@ export function groupEntriesByMonthIndex(
     ])
   }
 
+  // Fill in empty months (Jan-Dec) for every year that has data
+  for (const [year, months] of years) {
+    const existingKeys = new Set(months.map((m) => m.key))
+    for (let m = 1; m <= 12; m++) {
+      const key = `${year}-${String(m).padStart(2, '0')}`
+      if (!existingKeys.has(key)) {
+        months.push({
+          key,
+          label: formatNotebookLabel(key),
+          entries: [],
+          entryCount: 0,
+          isLoaded: true,
+        })
+      }
+    }
+  }
+
   return Array.from(years.entries())
     .sort(([yearA], [yearB]) => yearB.localeCompare(yearA))
     .map(([year, months]) => ({
@@ -486,12 +503,11 @@ export function upsertEntry(entries: DiaryEntry[], entry: DiaryEntry): DiaryEntr
 }
 
 export function mergePulledEntries(entries: DiaryEntry[], pulledEntries: DiaryEntry[]): DiaryEntry[] {
-  const localByDate = new Map(entries.map((entry) => [entry.diaryDate, normalizeEntry(entry)]))
-  const newPulledEntries = pulledEntries
-    .filter((entry) => !localByDate.has(entry.diaryDate))
-    .map(normalizeEntry)
-
-  return [...entries.map(normalizeEntry), ...newPulledEntries]
+  const localByDate = new Map(entries.map((entry) => [entry.diaryDate, entry]))
+  for (const pulled of pulledEntries) {
+    localByDate.set(pulled.diaryDate, normalizeEntry(pulled))
+  }
+  return Array.from(localByDate.values()).sort((a, b) => b.diaryDate.localeCompare(a.diaryDate))
 }
 
 export function groupEntriesByNotebook(entries: DiaryEntry[]): NotebookGroup[] {

@@ -4,7 +4,10 @@ export { getDailyWeatherFields, getWeightedDailyPrecipitationMm }
 import { updateEntryActivity, updateEntryPerson } from '../domain/entryTags'
 import { upsertEntry } from './entries'
 export { updateEntryActivity, updateEntryPerson }
-export { getLocationTagKey as getLocationNameKey } from '../domain/tagModels'
+import { getLocationTagKey } from '../domain/tagModels'
+export { getLocationTagKey as getLocationNameKey }
+
+const getLocationNameKey = getLocationTagKey
 
 export function clampMood(value: number): number {
   if (Number.isNaN(value))
