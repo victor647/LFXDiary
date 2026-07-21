@@ -16,17 +16,16 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DiaryEntry, NotebookGroup, TagFilter, TagFilterKind, TagFilterOption } from '../domain/types'
+import type { DiaryEntry, NotebookGroup, SyncTarget, TagFilter, TagFilterKind, TagFilterOption } from '../domain/types'
 import { getMoodBackgroundColor, getTagBackgroundColor, getTagTextColor } from '../utils/colors'
 import { formatDiaryDate } from '../utils/date'
 import { isEntryUnsynced } from '../utils/diaryEntryHelpers'
 import { DiaryWeatherIcon, EntryTagDots } from './DiaryIcons'
 
-type SidebarContextMenu = {
-  x: number
-  y: number
-  entry: DiaryEntry
-}
+type SidebarContextMenu =
+  | { x: number; y: number; entry: DiaryEntry }
+  | { x: number; y: number; kind: 'month'; key: string }
+  | { x: number; y: number; kind: 'year'; year: string }
 
 type SidebarSyncTarget =
   | { kind: 'entry'; key: string; notebookKey: string }
@@ -60,16 +59,14 @@ type SidebarProps = {
   statusMessage: string
   isCatalogOpen: boolean
   isSettingsOpen: boolean
+  selectedEntryIds: Set<string>
   onNewEntry: () => void
   onImportEvernoteFiles: (files: File[]) => void
-  onSync: () => void
-  onPull: () => void
-  onForcePull: () => void
   onOpenCatalog: () => void
   onOpenSettings: () => void
   onSearchChange: (query: string) => void
   onTagFilterChange: (filter: TagFilter) => void
-  onSelectEntry: (entry: DiaryEntry, notebookKey: string) => void
+  onSelectEntry: (entry: DiaryEntry, notebookKey: string, event: { ctrlKey: boolean; shiftKey: boolean }) => void
   onToggleDecade: (decade: string) => void
   onToggleYear: (year: string) => void
   onToggleMonth: (monthKey: string) => void
@@ -79,6 +76,10 @@ type SidebarProps = {
   onPullEntry: (entry: DiaryEntry) => void
   onPushEntry: (entry: DiaryEntry) => void
   onDeleteEntry: (entry: DiaryEntry) => void
+  onPushTarget: (target: SyncTarget) => void
+  onPullTarget: (target: SyncTarget) => void
+  onExportTarget: (target: SyncTarget) => void
+  onDeleteTarget: (target: SyncTarget) => void
 }
 
 export function Sidebar({
@@ -100,11 +101,9 @@ export function Sidebar({
   statusMessage,
   isCatalogOpen,
   isSettingsOpen,
+  selectedEntryIds,
   onNewEntry,
   onImportEvernoteFiles,
-  onSync,
-  onPull,
-  onForcePull,
   onOpenCatalog,
   onOpenSettings,
   onSearchChange,
@@ -119,6 +118,10 @@ export function Sidebar({
   onPullEntry,
   onPushEntry,
   onDeleteEntry,
+  onPushTarget,
+  onPullTarget,
+  onExportTarget,
+  onDeleteTarget,
 }: SidebarProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const tagFilterMenuRef = useRef<HTMLDivElement>(null)
@@ -425,6 +428,10 @@ export function Sidebar({
                           className={isSelectedYear ? 'year-toggle selected' : 'year-toggle'}
                           type="button"
                           onClick={() => onToggleYear(group.year)}
+                          onContextMenu={(event) => {
+                            event.preventDefault()
+                            onOpenContextMenu({ x: event.clientX, y: event.clientY, kind: 'year', year: group.year })
+                          }}
                         >
                           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           <span>{group.year}</span>
@@ -439,7 +446,13 @@ export function Sidebar({
 
                               return (
                                 <div className={isSelectedMonth ? 'month-group selected' : 'month-group'} key={month.key}>
-                                  <button className="month-tab" type="button" onClick={() => onToggleMonth(month.key)}>
+                                  <button className="month-tab" type="button"
+                                    onClick={() => onToggleMonth(month.key)}
+                                    onContextMenu={(event) => {
+                                      event.preventDefault()
+                                      onOpenContextMenu({ x: event.clientX, y: event.clientY, kind: 'month', key: month.key })
+                                    }}
+                                  >
                                     {expandedMonths.has(month.key) ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                                     <span>{month.label}</span>
                                     <span className={unsyncedCount ? 'month-count has-unsynced' : 'month-count'}>
@@ -451,7 +464,7 @@ export function Sidebar({
                                     (!selectedNotebook || selectedNotebook === month.key) &&
                                     month.entries.map((entry) => (
                                       <button
-                                        className={getEntryItemClassName(entry, draftId, isDraftDirty, unsavedEntryIds)}
+                                        className={getEntryItemClassName(entry, draftId, isDraftDirty, unsavedEntryIds, selectedEntryIds)}
                                         key={entry.id}
                                         type="button"
                                         title={getEntryItemTitle(entry, draftId, isDraftDirty, unsavedEntryIds)}
@@ -464,7 +477,7 @@ export function Sidebar({
                                             entry,
                                           })
                                         }}
-                                        onClick={() => onSelectEntry(entry, month.key)}
+                                        onClick={(e) => onSelectEntry(entry, month.key, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })}
                                       >
                                         <DiaryWeatherIcon entry={entry} />
                                         <span className="entry-date">{formatDiaryDate(entry.diaryDate)}</span>
@@ -494,47 +507,71 @@ export function Sidebar({
           onMouseLeave={onCloseContextMenu}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <button type="button" onClick={() => onPullEntry(contextMenu.entry)}>
-            <Download size={14} />
-            Pull Entry
-          </button>
-          <button type="button" onClick={() => onPushEntry(contextMenu.entry)}>
-            <Upload size={14} />
-            Push Entry
-          </button>
-          <button type="button" onClick={() => onExportEntry(contextMenu.entry)}>
-            <Download size={14} />
-            Export Entry
-          </button>
-          <button className="danger-menu-item" type="button" onClick={() => onDeleteEntry(contextMenu.entry)}>
-            <Trash2 size={14} />
-            Delete
-          </button>
+          {'entry' in contextMenu ? (
+            <>
+              <button type="button" onClick={() => onPullEntry(contextMenu.entry)}>
+                <Download size={14} />
+                Pull Entry
+              </button>
+              <button type="button" onClick={() => onPushEntry(contextMenu.entry)}>
+                <Upload size={14} />
+                Push Entry
+              </button>
+              <button type="button" onClick={() => onExportEntry(contextMenu.entry)}>
+                <Download size={14} />
+                Export Entry
+              </button>
+              <button className="danger-menu-item" type="button" onClick={() => onDeleteEntry(contextMenu.entry)}>
+                <Trash2 size={14} />
+                Delete
+              </button>
+            </>
+          ) : contextMenu.kind === 'month' ? (
+            <>
+              <button type="button" onClick={() => onPushTarget({ kind: 'month', key: contextMenu.key })}>
+                <Upload size={14} />
+                Push Month
+              </button>
+              <button type="button" onClick={() => onPullTarget({ kind: 'month', key: contextMenu.key })}>
+                <Download size={14} />
+                Pull Month
+              </button>
+              <button type="button" onClick={() => onExportTarget({ kind: 'month', key: contextMenu.key })}>
+                <Download size={14} />
+                Export Month
+              </button>
+              <button className="danger-menu-item" type="button" onClick={() => onDeleteTarget({ kind: 'month', key: contextMenu.key })}>
+                <Trash2 size={14} />
+                Delete Month
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={() => onPushTarget({ kind: 'year', year: contextMenu.year })}>
+                <Upload size={14} />
+                Push Year
+              </button>
+              <button type="button" onClick={() => onPullTarget({ kind: 'year', year: contextMenu.year })}>
+                <Download size={14} />
+                Pull Year
+              </button>
+              <button type="button" onClick={() => onExportTarget({ kind: 'year', year: contextMenu.year })}>
+                <Download size={14} />
+                Export Year
+              </button>
+              <button className="danger-menu-item" type="button" onClick={() => onDeleteTarget({ kind: 'year', year: contextMenu.year })}>
+                <Trash2 size={14} />
+                Delete Year
+              </button>
+            </>
+          )}
         </div>
       )}
 
       <div className="sync-panel">
-        <button
-          type="button"
-          onClick={onPull}
-          onContextMenu={(event) => {
-            event.preventDefault()
-            onForcePull()
-          }}
-          title="Pull Markdown entries from the sync provider (right-click for Force Pull)"
-        >
-          <Download size={18} />
-          Pull
-        </button>
-        <button
-          type="button"
-          onClick={onSync}
-          onContextMenu={(e) => e.preventDefault()}
-          title="Push unsynced entries in the selected year or month to the sync provider"
-        >
-          <Upload size={18} />
-          Push
-        </button>
+        {selectedEntryIds.size > 0 && (
+          <p className="multi-select-count">{selectedEntryIds.size} selected</p>
+        )}
         <p>{statusMessage}</p>
       </div>
     </aside>
@@ -589,11 +626,15 @@ function getEntryItemClassName(
   draftId: string,
   isDraftDirty: boolean,
   unsavedEntryIds: Set<string>,
+  selectedEntryIds: Set<string>,
 ): string {
   const classNames = ['entry-item']
 
   if (entry.id === draftId)
     classNames.push('selected')
+
+  if (selectedEntryIds.has(entry.id) && entry.id !== draftId)
+    classNames.push('multi-selected')
 
   if (isEntryUnsaved(entry, draftId, isDraftDirty, unsavedEntryIds))
     classNames.push('unsaved')

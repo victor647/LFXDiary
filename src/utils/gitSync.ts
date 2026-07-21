@@ -17,6 +17,7 @@ import {
   mergeDiaryCatalogs,
   serializeDiaryCatalog,
   serializeWeatherCodes,
+  stripGuidTagKeys,
 
 } from '../domain/diaryCatalog'
 import {
@@ -60,19 +61,24 @@ export async function pushEntriesToGit(
   if (!entries.length)
     return
 
+  onProgress?.(0, 0, 'Preparing Git repository...')
   const fs = await ensureGitRepository(settings)
 
+  onProgress?.(0, 0, 'Pulling latest changes...')
   await pullGit(fs, settings, true)
 
   const filepaths: string[] = []
 
+  onProgress?.(0, entries.length, 'Writing entry files...')
   for (const entry of entries) {
     const filepath = getEntryGitMarkdownPath(settings, entry)
     await writeRepoFile(fs, filepath, serializeDiaryEntryMarkdown(entry))
     filepaths.push(filepath)
-    onProgress?.(filepaths.length, entries.length, entry.diaryDate)
+    onProgress?.(filepaths.length, entries.length)
   }
+  onProgress?.(entries.length, entries.length, 'Entry files written.')
 
+  onProgress?.(0, 0, 'Backing up and merging catalog...')
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
 
@@ -88,17 +94,19 @@ export async function pushEntriesToGit(
 
   const localCatalog = applySettingsToDiaryCatalog(buildDiaryCatalog(catalogEntries), settings)
   const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
-  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
+  const mergedCatalog = stripGuidTagKeys(remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog)
   await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog))
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   filepaths.push(catalogPath, weatherCodesPath)
 
+  onProgress?.(0, 0, 'Staging changes...')
   for (const filepath of filepaths)
     await git.add({ fs, dir: repoDir, filepath })
 
   if (!(await hasStagedChanges(fs)))
     return
 
+  onProgress?.(0, 0, 'Committing changes...')
   await git.commit({
     fs,
     dir: repoDir,
@@ -106,6 +114,7 @@ export async function pushEntriesToGit(
     author: getGitAuthor(settings),
   })
 
+  onProgress?.(0, 0, 'Pushing to remote...')
   await runGitOperation('push', () =>
     git.push({
       fs,
@@ -127,12 +136,31 @@ export async function pullEntriesFromGit(
   return pullNotebookEntriesFromGit(settings, notebookKey ? [notebookKey] : undefined, onProgress ? { onProgress } : undefined)
 }
 
+export async function pullEntryFromGit(
+  settings: AppSettings,
+  entry: DiaryEntry,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry | null> {
+  const fs = await ensureGitRepository(settings)
+  await pullGit(fs, settings, false)
+
+  const catalog = await readOptionalRepoFile(fs, joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME))
+    .then((raw) => raw ? deserializeDiaryCatalog(raw) ?? undefined : undefined)
+  const filepath = getEntryGitMarkdownPath(settings, entry)
+  onProgress?.(0, 1, entry.diaryDate)
+  const result = deserializeDiaryEntryMarkdown(await readRepoFile(fs, filepath), getBaseName(filepath), catalog)
+  onProgress?.(1, 1, result?.diaryDate ?? getBaseName(filepath))
+  return result
+}
+
 export async function pullNotebookEntriesFromGit(
   settings: AppSettings,
   notebookKeys?: string[],
   options?: DiaryPullOptions,
 ): Promise<DiaryEntry[]> {
+  options?.onProgress?.(0, 0, 'Preparing Git repository...')
   const fs = await ensureGitRepository(settings)
+  options?.onProgress?.(0, 0, 'Pulling latest changes...')
   await pullGit(fs, settings, false)
 
   const catalog = await readOptionalRepoFile(fs, joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME))
@@ -140,9 +168,11 @@ export async function pullNotebookEntriesFromGit(
   const markdownFolders = notebookKeys?.length
     ? notebookKeys.map((notebookKey) => getNotebookGitMarkdownFolder(settings, notebookKey))
     : [settings.gitDiaryPath]
+  options?.onProgress?.(0, 0, 'Listing markdown files...')
   const markdownFiles = (await Promise.all(markdownFolders.map((folder) => listMarkdownFiles(fs, folder)))).flat()
   const entries: DiaryEntry[] = []
 
+  options?.onProgress?.(0, markdownFiles.length, 'Downloading entries...')
   for (const [index, filepath] of markdownFiles.entries()) {
     const entry = deserializeDiaryEntryMarkdown(await readRepoFile(fs, filepath), getBaseName(filepath), catalog)
 
@@ -151,69 +181,20 @@ export async function pullNotebookEntriesFromGit(
       options?.onEntry?.(entry)
     }
 
-    options?.onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? getBaseName(filepath))
+    options?.onProgress?.(index + 1, markdownFiles.length)
   }
 
+  options?.onProgress?.(markdownFiles.length, markdownFiles.length, 'Entry download complete.')
   return entries
-}
-
-export async function deleteEntryFromGit(entry: DiaryEntry, settings: AppSettings, catalogEntries: DiaryEntry[]) {
-  const fs = await ensureGitRepository(settings)
-  await pullGit(fs, settings, true)
-
-  const entryPath = getEntryGitMarkdownPath(settings, entry)
-  await deleteRepoFile(fs, entryPath)
-
-  const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
-  const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
-  const existingCatalogRaw = await readOptionalRepoFile(fs, catalogPath)
-
-  // Backup existing catalog before overwriting
-  const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
-  if (existingCatalogRaw) {
-    await ensureDirectory(fs, joinAbsolutePath(repoDir, backupFolder))
-    await writeRepoFile(fs, backupPath, existingCatalogRaw)
-  }
-
-  const localCatalog = applySettingsToDiaryCatalog(buildDiaryCatalog(catalogEntries), settings)
-  const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
-  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
-  await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog))
-  await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
-
-  await git.add({ fs, dir: repoDir, filepath: catalogPath })
-  await git.add({ fs, dir: repoDir, filepath: weatherCodesPath })
-
-  if (!(await hasStagedChanges(fs)))
-    return
-
-  await git.commit({
-    fs,
-    dir: repoDir,
-    message: `Delete diary entry: ${entry.diaryDate}`,
-    author: getGitAuthor(settings),
-  })
-
-  await runGitOperation('push', () =>
-    git.push({
-      fs,
-      http: gitHttp,
-      dir: repoDir,
-      remote: 'origin',
-      ref: settings.gitBranch,
-      corsProxy: settings.gitCorsProxy || undefined,
-      onAuth: () => getGitAuth(settings),
-    }),
-  )
 }
 
 export async function pullDiaryCatalogFromGit(
   settings: AppSettings,
   onProgress?: SyncProgressCallback,
 ): Promise<DiaryCatalog | null> {
+  onProgress?.(0, 0, 'Preparing Git repository...')
   const fs = await ensureGitRepository(settings)
+  onProgress?.(0, 0, 'Pulling latest changes...')
   await pullGit(fs, settings, false)
 
   onProgress?.(0, 1, 'Pulling catalog from Git')
@@ -230,13 +211,16 @@ export async function pushDiaryCatalogToGit(
   settings: AppSettings,
   onProgress?: SyncProgressCallback,
 ) {
+  onProgress?.(0, 0, 'Preparing Git repository...')
   const fs = await ensureGitRepository(settings)
+  onProgress?.(0, 0, 'Pulling latest changes...')
   await pullGit(fs, settings, true)
 
   const catalogPath = joinGitPath(settings.gitDiaryPath, DIARY_CATALOG_FILE_NAME)
   const weatherCodesPath = joinGitPath(settings.gitDiaryPath, WEATHER_CODES_FILE_NAME)
 
   // Backup existing catalog before overwriting
+  onProgress?.(0, 0, 'Backing up existing catalog...')
   const backupFolder = joinGitPath(settings.gitDiaryPath, CATALOG_BACKUP_FOLDER)
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = joinGitPath(backupFolder, `${DIARY_CATALOG_FILE_NAME}.${timestamp}.json`)
@@ -246,19 +230,22 @@ export async function pushDiaryCatalogToGit(
     await writeRepoFile(fs, backupPath, existingCatalogRaw)
   }
 
+  onProgress?.(0, 0, 'Merging and writing catalog...')
   const remoteCatalog = existingCatalogRaw ? deserializeDiaryCatalog(existingCatalogRaw) : null
-  const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog
+  const mergedCatalog = stripGuidTagKeys(remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog)
   await writeRepoFile(fs, catalogPath, serializeDiaryCatalog(mergedCatalog, settings))
   onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
   await writeRepoFile(fs, weatherCodesPath, serializeWeatherCodes())
   onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)
 
+  onProgress?.(0, 0, 'Staging changes...')
   await git.add({ fs, dir: repoDir, filepath: catalogPath })
   await git.add({ fs, dir: repoDir, filepath: weatherCodesPath })
 
   if (!(await hasStagedChanges(fs)))
     return
 
+  onProgress?.(0, 0, 'Committing changes...')
   await git.commit({
     fs,
     dir: repoDir,
@@ -266,6 +253,7 @@ export async function pushDiaryCatalogToGit(
     author: getGitAuthor(settings),
   })
 
+  onProgress?.(0, 0, 'Pushing to remote...')
   await runGitOperation('push', () =>
     git.push({
       fs,
@@ -522,21 +510,6 @@ async function readOptionalRepoFile(fs: LightningFS, filepath: string): Promise<
     return await readRepoFile(fs, filepath)
   } catch {
     return null
-  }
-}
-
-async function deleteRepoFile(fs: LightningFS, filepath: string) {
-  try {
-    await git.remove({ fs, dir: repoDir, filepath })
-    return
-  } catch {
-    // The file may be untracked or already missing from the repo index.
-  }
-
-  try {
-    await fs.promises.unlink(joinAbsolutePath(repoDir, filepath))
-  } catch {
-    // A missing remote file should not block local deletion; catalog updates still matter.
   }
 }
 

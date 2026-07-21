@@ -1,7 +1,7 @@
 import { ChevronRight, MapPin, Pin, Plus, Search, X } from 'lucide-react'
 import { type DragEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { dispatchTagEvent, type TagEvent } from '../../application/tagEvents'
+import { dispatchTagEvent, getWeatherResetPatch, type TagEvent } from '../../application/tagEvents'
 import { DEFAULT_CITY, DEFAULT_LOCATION_COLOR, LOCATION_COLOR_PALETTE } from '../../domain/constants'
 import { locationTagManager } from '../../domain/tagModels'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry, RecentCity } from '../../domain/types'
@@ -19,6 +19,7 @@ type LocationPanelProps = {
   onUpdateDraft: (patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
+  onDiaryCatalogChange: (catalog: DiaryCatalog) => void
   onStatusChange: (message: string) => void
 }
 
@@ -39,6 +40,7 @@ export function LocationPanel({
   onUpdateDraft,
   onDraftChange,
   onEntriesChange,
+  onDiaryCatalogChange,
   onStatusChange,
 }: LocationPanelProps) {
   const [cityQuery, setCityQuery] = useState('')
@@ -136,13 +138,16 @@ export function LocationPanel({
   }, [isLocationAddOpen])
 
   function applyTagEvent(event: TagEvent) {
-    const nextState = dispatchTagEvent({ settings, draft, entries }, event)
+    const nextState = dispatchTagEvent({ settings, draft, entries, diaryCatalog }, event)
 
     if (nextState.entries !== entries)
       onEntriesChange(nextState.entries)
 
     if (nextState.draft !== draft)
       onDraftChange(nextState.draft)
+
+    if (nextState.diaryCatalog && nextState.diaryCatalog !== diaryCatalog)
+      onDiaryCatalogChange(nextState.diaryCatalog)
   }
 
   function openOtherLocationDialog(color = DEFAULT_LOCATION_COLOR) {
@@ -225,10 +230,7 @@ export function LocationPanel({
     onUpdateDraft({
       cities: [DEFAULT_CITY],
       locationColors: { [DEFAULT_CITY.id]: DEFAULT_LOCATION_COLOR },
-      weatherSamples: [],
-      dailyWeatherCode: null,
-      dailyWeatherText: 'Not fetched',
-      dailyPrecipitationMm: 0,
+      ...getWeatherResetPatch(),
     })
     onStatusChange('Cleared locations.')
   }

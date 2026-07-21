@@ -126,23 +126,20 @@ export type AppSettings = {
   aliyunAirAppKey: string
   aliyunAirAppSecret: string
   activityColorGroupNames: Record<string, string>
-  /** GUID → tag metadata for activity tags */
+  /** Tag name → metadata */
   activityTags: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
   }>
   personColorGroupNames: Record<string, string>
-  /** GUID → tag metadata for person tags */
+  /** Tag name → metadata */
   peopleTags: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
   }>
   pointOfInterestColorGroupNames: Record<string, string>
-  /** GUID → tag metadata for point-of-interest tags */
+  /** Tag name → metadata */
   pointOfInterestTags: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
   }>
@@ -160,23 +157,20 @@ export type DiaryCatalog = {
     pinned?: boolean
     entries: string[]
   }>
-  /** GUID → tag metadata for activities */
+  /** Tag name → catalog entry */
   activities: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
-  /** GUID → tag metadata for people */
+  /** Tag name → catalog entry */
   people: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
     entries: string[]
   }>
-  /** GUID → tag metadata for points of interest */
+  /** Tag name → catalog entry */
   pointsOfInterest: Record<TagId, {
-    name: string
     color: string
     pinned?: boolean
     entries: string[]
@@ -239,12 +233,19 @@ export type PendingPullReview = {
   index: number
 }
 
+export type SyncLogLine = {
+  text: string
+  level: 'info' | 'success' | 'error'
+}
+
 export type SyncProgress = {
   target: string
   message: string
   title?: string
   current?: number
   total?: number
+  logLines?: SyncLogLine[]
+  errorLog?: string
 }
 
 export type SyncTarget =

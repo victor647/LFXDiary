@@ -30,3 +30,7 @@ android/
 .codemaker/codeindex/
 .agents/skills/codemap-*/
 .agents/skills/code-index-*/
+.mcp.json
+.claude/skills/codemap-*/
+.claude/skills/code-index-*/
+.claude/settings.local.json

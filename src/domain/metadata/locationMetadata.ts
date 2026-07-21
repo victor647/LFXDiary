@@ -69,9 +69,7 @@ export function isCity(value: unknown): value is City {
   return Boolean(city.id && city.name && typeof city.latitude === 'number' && typeof city.longitude === 'number')
 }
 
-export function getCityCatalogKey(city: City): string {
-  return city.name.trim().toLowerCase() || formatCityDisplayName(city).toLowerCase()
-}
+export { getLocationTagKey as getCityCatalogKey } from '../tagModels'
 
 export function getDefaultLocationColor(): string {
   return DEFAULT_LOCATION_COLOR

@@ -4,6 +4,8 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FileDown,
+  FileUp,
   GitBranch,
   HardDrive,
   Leaf,
@@ -18,13 +20,13 @@ import {
   Search,
   Star,
   Thermometer,
+  Trash2,
   Upload,
   Users,
-  RefreshCw,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useMemo, useRef, useState } from 'react'
-import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../application/tagEvents'
+import { dispatchTagEvent, type NamedTagManager, type TagEvent } from '../application/tagEvents'
 import { DEFAULT_CITY, LOCATION_COLOR_PALETTE } from '../domain/constants'
 import {
   activityTagManager,
@@ -69,9 +71,11 @@ type SettingsPageProps = {
   onEntriesChange: (entries: DiaryEntry[]) => void
   onStatusChange: (message: string) => void
   onSave: () => void
+  onPushCatalog: () => void
   onExportCatalog: () => void
   onImportCatalog: (file: File) => void
   onPullCatalog: () => void
+  onCleanCatalog?: () => void
   onNavigateDate?: (date: string) => void
   onBack: () => void
 }
@@ -80,7 +84,7 @@ type ActivityTagItem = ActivityTag
 type PeopleTagItem = PersonTag
 type PointOfInterestTagItem = PointOfInterestTag
 type LocationTagItem = LocationTag
-type CatalogManager = CatalogTagManager
+type CatalogManager = NamedTagManager
 
 export function SettingsPage({
   variant,
@@ -94,9 +98,11 @@ export function SettingsPage({
   onEntriesChange,
   onStatusChange,
   onSave,
+  onPushCatalog,
   onExportCatalog,
   onImportCatalog,
   onPullCatalog,
+  onCleanCatalog,
   onNavigateDate,
   onBack,
 }: SettingsPageProps) {
@@ -313,7 +319,7 @@ export function SettingsPage({
     }
 
     const duplicateTag = getManagerTags(manager).find((tag) => {
-      return manager.normalizeName(tag.name) === manager.normalizeName(nextTag) && manager.normalizeName(tag.name) !== manager.normalizeName(oldTag)
+      return manager.normalizeName(tag.name) === nextTag && manager.normalizeName(tag.name) !== manager.normalizeName(oldTag)
     })
 
     if (duplicateTag && !window.confirm(`${manager.itemLabel} "${nextTag}" already exists. Merge "${oldTag}" into "${duplicateTag.name}"?`)) {
@@ -325,7 +331,7 @@ export function SettingsPage({
       type: 'catalog-tag-updated',
       manager,
       oldTag,
-      nextTag,
+      nextTag: duplicateTag?.name ?? nextTag,
       name: nextName,
       color,
     })
@@ -362,14 +368,14 @@ export function SettingsPage({
     onStatusChange(`Added ${manager.itemLabel.toLowerCase()}: ${nextTag}`)
   }
 
-  function applyCatalogTagPin(manager: CatalogManager, tag: string, pinned: boolean) {
+  function applyCatalogTagPin(manager: CatalogManager, tagId: string, pinned: boolean) {
     applyTagEvent({
       type: 'catalog-tag-pin-updated',
       manager,
-      tagId: tag,
+      tagId,
       pinned,
     })
-    onStatusChange(`${pinned ? 'Pinned' : 'Unpinned'} ${manager.itemLabel.toLowerCase()}: ${tag}`)
+    onStatusChange(`${pinned ? 'Pinned' : 'Unpinned'} ${manager.itemLabel.toLowerCase()}: ${tagId}`)
   }
 
   function getMoveTargets(sourceManager: CatalogManager): CatalogManager[] {
@@ -396,9 +402,7 @@ export function SettingsPage({
   }
 
   function getCatalogSectionForManager(manager: CatalogManager): DiaryCatalog['activities'] {
-    if (manager === activityTagManager) return diaryCatalog.activities
-    if (manager === personTagManager) return diaryCatalog.people
-    return diaryCatalog.pointsOfInterest
+    return manager.getCatalogSection(diaryCatalog)
   }
 
   function handleTagContextMenu(tag: { key: string; name: string; color: string }, manager: CatalogManager, event: React.MouseEvent) {
@@ -412,7 +416,7 @@ export function SettingsPage({
       ...getMoveTargets(manager).map((target) => ({
         kind: 'action' as const,
         label: `Move to ${target.itemLabelPlural}`,
-        onClick: () => moveTag(manager, tag.key, tag.color, target.itemLabelPlural),
+        onClick: () => moveTag(manager, tag.name, tag.color, target.itemLabelPlural),
       })),
     ]
 
@@ -506,22 +510,32 @@ export function SettingsPage({
         <div className="settings-header-actions">
           <button type="button" className="settings-save-button" onClick={onSave}>
             <Save size={16} />
-            {isCatalogPage ? 'Save Catalog' : 'Save Settings'}
+            {isCatalogPage ? 'Save' : 'Save Settings'}
           </button>
           {isCatalogPage && (
             <>
-              <button type="button" className="settings-file-button" onClick={onExportCatalog}>
+              <button type="button" className="settings-file-button" onClick={onPullCatalog}>
                 <Download size={16} />
-                Export
-              </button>
-                            <button type="button" className="settings-file-button" onClick={onPullCatalog}>
-                <RefreshCw size={16} />
                 Pull
               </button>
-              <button type="button" className="settings-file-button" onClick={() => catalogImportInputRef.current?.click()}>
+              <button type="button" className="settings-file-button" onClick={onPushCatalog}>
                 <Upload size={16} />
+                Push
+              </button>
+              <button type="button" className="settings-file-button" onClick={onExportCatalog}>
+                <FileDown size={16} />
+                Export
+              </button>
+              <button type="button" className="settings-file-button" onClick={() => catalogImportInputRef.current?.click()}>
+                <FileUp size={16} />
                 Import
               </button>
+              {onCleanCatalog && (
+                <button type="button" className="settings-file-button settings-clean-button" onClick={onCleanCatalog}>
+                  <Trash2 size={16} />
+                  Clean
+                </button>
+              )}
               <input
                 ref={catalogImportInputRef}
                 className="sidebar-file-input"

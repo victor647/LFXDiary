@@ -11,10 +11,10 @@ import {
   emptyMood,
 } from '../domain/constants'
 import { buildDiaryCatalog, deserializeDiaryCatalog } from '../domain/diaryCatalog'
-import type { AppSettings, City, DiaryCatalog, DiaryEntry, NotebookGroup, PullConflict, RecentCity, RecentTag, WeatherSample } from '../domain/types'
+import type { AppSettings, City, DiaryCatalog, DiaryEntry, NotebookGroup, PullConflict, RecentCity, WeatherSample } from '../domain/types'
 import { getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 import { formatNotebookLabel, getNotebookKey, getNotebookYear, toDateInputValue } from './date'
-import { normalizePersonTag, normalizePointOfInterestTag, normalizeTags, sanitizeTag } from './tags'
+import { normalizeTags } from './tags'
 import { areRecordsEqual, areStringArraysEqual, getNormalizedDailyWeatherFields } from './diaryEntryHelpers'
 import { normalizeBodyText } from './syncErrorLog'
 
@@ -566,17 +566,17 @@ export function getPeopleMentionOptions(settings: AppSettings, catalog: DiaryCat
 
   for (const [id, tag] of Object.entries(settings.peopleTags)) {
     if (!id) continue
-    people.set(id, { id, name: tag.name || id, color: tag.color || DEFAULT_TAG_COLOR })
+    people.set(id, { id, name: id, color: tag.color || DEFAULT_TAG_COLOR })
   }
 
   for (const [id, tag] of Object.entries(catalog.people)) {
     if (!id || people.has(id)) continue
-    people.set(id, { id, name: tag.name || id, color: tag.color || DEFAULT_TAG_COLOR })
+    people.set(id, { id, name: id, color: tag.color || DEFAULT_TAG_COLOR })
   }
 
   for (const id of draft.people ?? []) {
     if (!id || people.has(id)) continue
-    people.set(id, { id, name: settings.peopleTags[id]?.name || catalog.people[id]?.name || id, color: draft.personColors?.[id] ?? DEFAULT_TAG_COLOR })
+    people.set(id, { id, name: id, color: draft.personColors?.[id] ?? DEFAULT_TAG_COLOR })
   }
 
   return Array.from(people.values())
@@ -625,66 +625,6 @@ export function getRecentCities(entries: DiaryEntry[]): RecentCity[] {
   }
 
   return Array.from(cities.values()).sort((a, b) => a.city.name.localeCompare(b.city.name))
-}
-
-export function getRecentTags(entries: DiaryEntry[]): RecentTag[] {
-  const cutoff = new Date()
-  cutoff.setFullYear(cutoff.getFullYear() - 1)
-  const cutoffDate = toDateInputValue(cutoff)
-  const tags = new Map<string, string>()
-
-  for (const entry of entries) {
-    if (entry.diaryDate < cutoffDate)
-      continue
-
-    for (const tag of entry.tags)
-      tags.set(sanitizeTag(tag), entry.tagColors[tag] ?? DEFAULT_TAG_COLOR)
-  }
-
-  return Array.from(tags.entries())
-    .map(([name, color]) => ({ id: name, name, color }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-}
-
-export function getRecentPeople(entries: DiaryEntry[]): RecentTag[] {
-  const cutoff = new Date()
-  cutoff.setFullYear(cutoff.getFullYear() - 1)
-  const cutoffDate = toDateInputValue(cutoff)
-  const people = new Map<string, string>()
-
-  for (const entry of entries) {
-    if (entry.diaryDate < cutoffDate)
-      continue
-
-    for (const person of entry.people ?? [])
-      people.set(normalizePersonTag(person), entry.personColors?.[person] ?? DEFAULT_TAG_COLOR)
-  }
-
-  return Array.from(people.entries())
-    .map(([name, color]) => ({ id: name, name, color }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-}
-
-export function getRecentPointsOfInterest(entries: DiaryEntry[]): RecentTag[] {
-  const cutoff = new Date()
-  cutoff.setFullYear(cutoff.getFullYear() - 1)
-  const cutoffDate = toDateInputValue(cutoff)
-  const pointsOfInterest = new Map<string, string>()
-
-  for (const entry of entries) {
-    if (entry.diaryDate < cutoffDate)
-      continue
-
-    for (const pointOfInterest of entry.pointsOfInterest ?? [])
-      pointsOfInterest.set(
-        normalizePointOfInterestTag(pointOfInterest),
-        entry.pointOfInterestColors?.[pointOfInterest] ?? DEFAULT_TAG_COLOR,
-      )
-  }
-
-  return Array.from(pointsOfInterest.entries())
-    .map(([name, color]) => ({ id: name, name, color }))
-    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export function normalizeLocationColors(locationColors: Record<string, string>, cities: City[]): Record<string, string> {

@@ -10,6 +10,7 @@ import {
   mergeDiaryCatalogs,
   serializeDiaryCatalog,
   serializeWeatherCodes,
+  stripGuidTagKeys,
 
 } from '../domain/diaryCatalog'
 import {
@@ -94,10 +95,12 @@ export async function uploadEntriesToSynology(
   if (!entries.length)
     return
 
+  onProgress?.(0, 0, 'Logging into NAS...')
   const baseUrl = getSynologyApiBaseUrl(settings)
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword)
 
   try {
+    onProgress?.(0, entries.length, 'Uploading entry files...')
     for (const [index, entry] of entries.entries()) {
       await uploadMarkdownFile(
         baseUrl,
@@ -106,15 +109,19 @@ export async function uploadEntriesToSynology(
         getEntryNasMarkdownFileName(entry),
         serializeDiaryEntryMarkdown(entry),
       )
-      onProgress?.(index + 1, entries.length, entry.diaryDate)
+      onProgress?.(index + 1, entries.length)
     }
+    onProgress?.(entries.length, entries.length, 'Entry upload complete.')
 
     // Download remote catalog for merge, then backup
+    onProgress?.(0, 0, 'Downloading remote catalog for merge...')
     const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder)
+    onProgress?.(0, 0, 'Backing up existing catalog...')
     await backupExistingCatalogOnNas(baseUrl, session, settings)
 
+    onProgress?.(0, 0, 'Merging and uploading catalog...')
     const localCatalog = buildDiaryCatalog(catalogEntries)
-    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
+    const mergedCatalog = stripGuidTagKeys(remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog)
     await uploadTextFile(
       baseUrl,
       session,
@@ -123,6 +130,7 @@ export async function uploadEntriesToSynology(
       serializeDiaryCatalog(mergedCatalog, settings),
       'application/json;charset=utf-8',
     )
+    onProgress?.(0, 0, 'Uploading weather codes...')
     await uploadTextFile(
       baseUrl,
       session,
@@ -132,43 +140,7 @@ export async function uploadEntriesToSynology(
       'application/json;charset=utf-8',
     )
   } finally {
-    await logoutFromSynology(baseUrl, session)
-  }
-}
-
-export async function deleteEntryFromSynology(entry: DiaryEntry, settings: AppSettings, catalogEntries: DiaryEntry[]) {
-  if (!settings.nasUsername.trim() || !settings.nasPassword)
-    throw new Error('Enter your NAS username and password in Settings first.')
-
-  const baseUrl = getSynologyApiBaseUrl(settings)
-  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword)
-
-  try {
-    await deleteFileFromSynology(baseUrl, session, getEntryMarkdownPath(settings.markdownFolder, entry))
-
-    // Download remote catalog for merge, then backup
-    const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder)
-    await backupExistingCatalogOnNas(baseUrl, session, settings)
-
-    const localCatalog = buildDiaryCatalog(catalogEntries)
-    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(localCatalog, remoteCatalog) : localCatalog
-    await uploadTextFile(
-      baseUrl,
-      session,
-      settings.markdownFolder,
-      DIARY_CATALOG_FILE_NAME,
-      serializeDiaryCatalog(mergedCatalog, settings),
-      'application/json;charset=utf-8',
-    )
-    await uploadTextFile(
-      baseUrl,
-      session,
-      settings.markdownFolder,
-      WEATHER_CODES_FILE_NAME,
-      serializeWeatherCodes(),
-      'application/json;charset=utf-8',
-    )
-  } finally {
+    onProgress?.(0, 0, 'Logging out...')
     await logoutFromSynology(baseUrl, session)
   }
 }
@@ -243,6 +215,7 @@ async function downloadDiaryCatalogFromSynologyMode(
 ): Promise<DiaryCatalog | null> {
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
+  onProgress?.(0, 0, 'Logging into NAS...')
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
@@ -252,6 +225,7 @@ async function downloadDiaryCatalogFromSynologyMode(
 
     return catalog ?? null
   } finally {
+    onProgress?.(0, 0, 'Logging out...')
     await logoutFromSynology(baseUrl, session, requestOptions)
   }
 }
@@ -263,14 +237,18 @@ async function uploadDiaryCatalogToSynologyMode(
 ) {
   const baseUrl = getSynologyApiBaseUrl(settings)
   const requestOptions = { requestTimeoutMs: CATALOG_SYNC_REQUEST_TIMEOUT_MS }
+  onProgress?.(0, 0, 'Logging into NAS...')
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
     // Download remote catalog for merge, then backup
+    onProgress?.(0, 0, 'Downloading remote catalog for merge...')
     const remoteCatalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
+    onProgress?.(0, 0, 'Backing up existing catalog...')
     await backupExistingCatalogOnNas(baseUrl, session, settings, requestOptions)
 
-    const mergedCatalog = remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog
+    onProgress?.(0, 0, 'Merging and uploading catalog...')
+    const mergedCatalog = stripGuidTagKeys(remoteCatalog ? mergeDiaryCatalogs(catalog, remoteCatalog) : catalog)
     await uploadTextFile(
       baseUrl,
       session,
@@ -281,6 +259,7 @@ async function uploadDiaryCatalogToSynologyMode(
       requestOptions,
     )
     onProgress?.(1, 2, DIARY_CATALOG_FILE_NAME)
+    onProgress?.(0, 0, 'Uploading weather codes...')
     await uploadTextFile(
       baseUrl,
       session,
@@ -292,6 +271,7 @@ async function uploadDiaryCatalogToSynologyMode(
     )
     onProgress?.(2, 2, WEATHER_CODES_FILE_NAME)
   } finally {
+    onProgress?.(0, 0, 'Logging out...')
     await logoutFromSynology(baseUrl, session, requestOptions)
   }
 }
@@ -302,6 +282,31 @@ export async function downloadEntriesFromSynology(
   onProgress?: SyncProgressCallback,
 ): Promise<DiaryEntry[]> {
   return downloadNotebookEntriesFromSynology(settings, notebookKey ? [notebookKey] : undefined, onProgress ? { onProgress } : undefined)
+}
+
+export async function pullEntryFromSynology(
+  settings: AppSettings,
+  entry: DiaryEntry,
+  onProgress?: SyncProgressCallback,
+): Promise<DiaryEntry | null> {
+  if (!settings.nasUsername.trim() || !settings.nasPassword)
+    throw new Error('Enter your NAS username and password in Settings first.')
+
+  const baseUrl = getSynologyApiBaseUrl(settings)
+  const requestOptions = { requestTimeoutMs: PULL_REQUEST_TIMEOUT_MS }
+  const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
+
+  try {
+    const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
+    const filePath = `${getEntryMarkdownFolder(settings.markdownFolder, entry)}/${getEntryNasMarkdownFileName(entry)}`
+    onProgress?.(0, 1, entry.diaryDate)
+    const text = await downloadTextFile(baseUrl, session, filePath, requestOptions)
+    const result = deserializeDiaryEntryMarkdown(text, getEntryNasMarkdownFileName(entry), catalog)
+    onProgress?.(1, 1, result?.diaryDate ?? entry.diaryDate)
+    return result
+  } finally {
+    await logoutFromSynology(baseUrl, session, requestOptions)
+  }
 }
 
 export async function downloadNotebookEntriesFromSynology(
@@ -360,15 +365,19 @@ async function downloadEntriesFromSynologyMode(
   const markdownFolders = notebookKeys?.length
     ? notebookKeys.map((notebookKey) => getNotebookMarkdownFolder(settings.markdownFolder, notebookKey))
     : [settings.markdownFolder]
+  options?.onProgress?.(0, 0, 'Logging into NAS...')
   const session = await loginToSynology(baseUrl, settings.nasUsername, settings.nasPassword, requestOptions)
 
   try {
+    options?.onProgress?.(0, 0, 'Downloading catalog...')
     const catalog = await downloadDiaryCatalog(baseUrl, session, settings.markdownFolder, requestOptions)
+    options?.onProgress?.(0, 0, 'Listing markdown files...')
     const markdownFiles = (await Promise.all(
       markdownFolders.map((markdownFolder) => listMarkdownFiles(baseUrl, session, markdownFolder, 0, requestOptions)),
     )).flat()
     const entries: DiaryEntry[] = []
 
+    options?.onProgress?.(0, markdownFiles.length, 'Downloading entries...')
     for (const [index, file] of markdownFiles.entries()) {
       const entry = deserializeDiaryEntryMarkdown(await downloadMarkdownFile(baseUrl, session, file.path, requestOptions), file.name, catalog)
 
@@ -377,11 +386,13 @@ async function downloadEntriesFromSynologyMode(
         options?.onEntry?.(entry)
       }
 
-      options?.onProgress?.(index + 1, markdownFiles.length, entry?.diaryDate ?? file.name)
+      options?.onProgress?.(index + 1, markdownFiles.length)
     }
+    options?.onProgress?.(markdownFiles.length, markdownFiles.length, 'Entry download complete.')
 
     return entries
   } finally {
+    options?.onProgress?.(0, 0, 'Logging out...')
     await logoutFromSynology(baseUrl, session, requestOptions)
   }
 }
@@ -693,27 +704,6 @@ async function downloadMarkdownFile(
   return downloadTextFile(baseUrl, session, filePath, options)
 }
 
-async function deleteFileFromSynology(baseUrl: string, session: SynologySession, filePath: string) {
-  const url = makeAuthedSynologyUrl(baseUrl, session)
-  const body = new URLSearchParams({
-    api: 'SYNO.FileStation.Delete',
-    version: '2',
-    method: 'delete',
-    path: JSON.stringify([filePath]),
-  })
-
-  const response = await fetchSynology(url, { method: 'POST', body }, 'delete')
-  const payload = await parseSynologyResponse(response, 'delete', url.toString())
-
-  if (!payload.success)
-    throw new SynologySyncError(
-      getSynologyErrorMessage(payload.error?.code, 'Markdown delete failed.', payload.error?.message),
-      'delete',
-      url.toString(),
-      payload.error?.code,
-    )
-}
-
 async function downloadTextFile(
   baseUrl: string,
   session: SynologySession,
@@ -782,10 +772,6 @@ function makeAuthedSynologyUrl(baseUrl: string, session: SynologySession): URL {
     url.searchParams.set('SynoToken', session.synoToken)
 
   return url
-}
-
-function getEntryMarkdownPath(baseFolder: string, entry: DiaryEntry): string {
-  return `${getEntryMarkdownFolder(baseFolder, entry)}/${getEntryNasMarkdownFileName(entry)}`
 }
 
 async function fetchSynology(

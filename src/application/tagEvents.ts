@@ -1,5 +1,4 @@
 import type { ActivityTag, CatalogDiaryTagManager, PersonTag, PointOfInterestTag } from '../domain/tagModels'
-import { ActivityTagManager, PersonTagManager, PointOfInterestTagManager } from '../domain/tagModels'
 import { moveDiaryCatalogNamedTag, updateDiaryCatalogLocationCity, updateDiaryCatalogLocationPin, updateDiaryCatalogNamedTagSection } from '../domain/diaryCatalog'
 import type { AppSettings, City, DiaryCatalog, DiaryEntry, TagId } from '../domain/types'
 import {
@@ -9,7 +8,7 @@ import {
   updateEntryLocations,
 } from '../utils/diaryEntryHelpers'
 
-export type CatalogTagManager = CatalogDiaryTagManager<ActivityTag | PersonTag | PointOfInterestTag>
+export type NamedTagManager = CatalogDiaryTagManager<ActivityTag | PersonTag | PointOfInterestTag>
 
 export type TagEventState = {
   settings: AppSettings
@@ -21,14 +20,14 @@ export type TagEventState = {
 export type TagEvent =
   | {
     type: 'catalog-tag-added'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagId: TagId
     name: string
     color: string
   }
   | {
     type: 'catalog-tag-updated'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     oldTag: TagId
     nextTag: TagId
     name: string
@@ -36,37 +35,37 @@ export type TagEvent =
   }
   | {
     type: 'catalog-tags-deleted'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagIds: TagId[]
   }
   | {
     type: 'catalog-tag-pin-updated'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagId: TagId
     pinned: boolean
   }
   | {
     type: 'catalog-tag-moved'
-    sourceManager: CatalogTagManager
-    targetManager: CatalogTagManager
+    sourceManager: NamedTagManager
+    targetManager: NamedTagManager
     tagId: TagId
     color: string
   }
   | {
     type: 'entry-tag-added'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagId: TagId
     name: string
     color: string
   }
   | {
     type: 'entry-tags-deleted'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagIds: TagId[]
   }
   | {
     type: 'entry-tags-reordered'
-    manager: CatalogTagManager
+    manager: NamedTagManager
     tagIds: TagId[]
   }
   | {
@@ -117,7 +116,7 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
       ...state,
       settings: event.manager.setCatalog(state.settings, {
         ...event.manager.getCatalog(state.settings),
-        [event.tagId]: { name: event.name, color: event.color },
+        [event.tagId]: { color: event.color },
       }),
     }
   }
@@ -170,7 +169,7 @@ function catalogTagObserver(event: TagEvent, state: TagEventState): TagEventStat
         ),
         {
           ...event.targetManager.getCatalog(state.settings),
-          [event.tagId]: { name: event.targetManager.getCatalog(state.settings)[event.tagId]?.name ?? event.tagId, color: event.color },
+          [event.tagId]: { color: event.color },
         },
       ),
     }
@@ -367,7 +366,7 @@ function markEntryEdited(entry: DiaryEntry): DiaryEntry {
   }
 }
 
-function getWeatherResetPatch(): Pick<DiaryEntry, 'weatherSamples' | 'dailyWeatherCode' | 'dailyWeatherText' | 'dailyPrecipitationMm'> {
+export function getWeatherResetPatch(): Pick<DiaryEntry, 'weatherSamples' | 'dailyWeatherCode' | 'dailyWeatherText' | 'dailyPrecipitationMm'> {
   return {
     weatherSamples: [],
     dailyWeatherCode: null,
@@ -378,66 +377,28 @@ function getWeatherResetPatch(): Pick<DiaryEntry, 'weatherSamples' | 'dailyWeath
 
 function updateDiaryCatalogSection(
   catalog: DiaryCatalog,
-  manager: CatalogTagManager,
+  manager: NamedTagManager,
   oldTag: string,
   nextTag: string,
   color: string,
 ): DiaryCatalog {
-  if (manager instanceof ActivityTagManager) {
-    return {
-      ...catalog,
-      activities: updateDiaryCatalogNamedTagSection(catalog.activities, oldTag, nextTag, color),
-    }
-  }
-
-  if (manager instanceof PersonTagManager) {
-    return {
-      ...catalog,
-      people: updateDiaryCatalogNamedTagSection(catalog.people, oldTag, nextTag, color),
-    }
-  }
-
-  if (manager instanceof PointOfInterestTagManager) {
-    return {
-      ...catalog,
-      pointsOfInterest: updateDiaryCatalogNamedTagSection(catalog.pointsOfInterest, oldTag, nextTag, color),
-    }
-  }
-
-  return catalog
+  const section = manager.getCatalogSection(catalog)
+  return manager.setCatalogSection(catalog, updateDiaryCatalogNamedTagSection(section, oldTag, nextTag, color))
 }
 
 function moveDiaryCatalogBetweenSections(
   catalog: DiaryCatalog,
-  sourceManager: CatalogTagManager,
-  targetManager: CatalogTagManager,
+  sourceManager: NamedTagManager,
+  targetManager: NamedTagManager,
   tag: string,
   color: string,
 ): DiaryCatalog {
-  const sourceSection = getCatalogSection(catalog, sourceManager)
-  const targetSection = getCatalogSection(catalog, targetManager)
+  const sourceSection = sourceManager.getCatalogSection(catalog)
+  const targetSection = targetManager.getCatalogSection(catalog)
   const result = moveDiaryCatalogNamedTag(sourceSection, targetSection, tag, color)
 
-  return setCatalogSection(setCatalogSection(catalog, sourceManager, result.sourceSection), targetManager, result.targetSection)
-}
-
-function getCatalogSection(
-  catalog: DiaryCatalog,
-  manager: CatalogTagManager,
-): DiaryCatalog['activities'] {
-  if (manager instanceof ActivityTagManager) return catalog.activities
-  if (manager instanceof PersonTagManager) return catalog.people
-  if (manager instanceof PointOfInterestTagManager) return catalog.pointsOfInterest
-  return {} as DiaryCatalog['activities']
-}
-
-function setCatalogSection(
-  catalog: DiaryCatalog,
-  manager: CatalogTagManager,
-  section: DiaryCatalog['activities'],
-): DiaryCatalog {
-  if (manager instanceof ActivityTagManager) return { ...catalog, activities: section }
-  if (manager instanceof PersonTagManager) return { ...catalog, people: section }
-  if (manager instanceof PointOfInterestTagManager) return { ...catalog, pointsOfInterest: section }
-  return catalog
+  return targetManager.setCatalogSection(
+    sourceManager.setCatalogSection(catalog, result.sourceSection),
+    result.targetSection,
+  )
 }

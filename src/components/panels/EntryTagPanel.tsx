@@ -1,7 +1,7 @@
 import { ChevronRight, Plus, Sparkles, X } from 'lucide-react'
 import type { DragEvent, ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { dispatchTagEvent, type CatalogTagManager, type TagEvent } from '../../application/tagEvents'
+import { dispatchTagEvent, type NamedTagManager, type TagEvent } from '../../application/tagEvents'
 import { createPortal } from 'react-dom'
 import { DEFAULT_TAG_COLOR, TAG_COLOR_PALETTE } from '../../domain/constants'
 import type { AppSettings, DiaryCatalog, DiaryEntry } from '../../domain/types'
@@ -19,16 +19,17 @@ type EntryTagPanelProps = {
   draft: DiaryEntry
   entries: DiaryEntry[]
   settings: AppSettings
-  diaryCatalog?: DiaryCatalog
+  diaryCatalog: DiaryCatalog
   clearActionLabel?: string
   getClearableTags?: (tags: string[], draft: DiaryEntry) => string[]
   icon: ReactNode
-  manager: CatalogTagManager
+  manager: NamedTagManager
   onAutoAnalyze?: () => void
   onNavigateDate?: (date: string) => void
   onSettingsChange: (settings: AppSettings) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
+  onDiaryCatalogChange: (catalog: DiaryCatalog) => void
   onStatusChange: (message: string) => void
 }
 
@@ -55,6 +56,7 @@ export function EntryTagPanel({
   onSettingsChange,
   onDraftChange,
   onEntriesChange,
+  onDiaryCatalogChange,
   onStatusChange,
 }: EntryTagPanelProps) {
   const [editingTagName, setEditingTagName] = useState<string | null>(null)
@@ -69,7 +71,6 @@ export function EntryTagPanel({
   const catalogEntries = useMemo(() => [draft, ...entries.filter((entry) => entry.id !== draft.id)], [draft, entries])
   const currentTags = manager.getEntryTagIds(draft)
   const currentColors = manager.getEntryColors(draft)
-  const catalogTags = manager.getCatalog(settings)
   const clearableTags = clearActionLabel ? getClearableTags?.(currentTags, draft) ?? currentTags : []
   const colorNames = manager.getColorNames(settings)
   const availableRecentTags = useMemo(() => {
@@ -94,7 +95,7 @@ export function EntryTagPanel({
     : tagColorGroups[0]?.color ?? DEFAULT_TAG_COLOR
 
   function applyTagEvent(event: TagEvent) {
-    const nextState = dispatchTagEvent({ settings, draft, entries }, event)
+    const nextState = dispatchTagEvent({ settings, draft, entries, diaryCatalog }, event)
 
     if (nextState.settings !== settings)
       onSettingsChange(nextState.settings)
@@ -104,6 +105,9 @@ export function EntryTagPanel({
 
     if (nextState.draft !== draft)
       onDraftChange(nextState.draft)
+
+    if (nextState.diaryCatalog && nextState.diaryCatalog !== diaryCatalog)
+      onDiaryCatalogChange(nextState.diaryCatalog)
   }
 
   useEffect(() => {
@@ -159,7 +163,13 @@ export function EntryTagPanel({
     if (!tag)
       return
 
-    if (!currentTags.includes(tag) && currentTags.length >= manager.maxTags) {
+    if (currentTags.includes(tag)) {
+      setIsTagAddOpen(false)
+      setAddingTagColor(null)
+      return
+    }
+
+    if (currentTags.length >= manager.maxTags) {
       onStatusChange(`Each entry can have up to ${manager.maxTags} ${manager.itemLabelPlural.toLowerCase()}.`)
       return
     }
@@ -214,7 +224,7 @@ export function EntryTagPanel({
       type: 'catalog-tag-updated',
       manager,
       oldTag: editingTagName,
-      nextTag: duplicateTag?.key ?? editingTagName,
+      nextTag: duplicateTag?.name ?? nextTag,
       name: nextName,
       color,
     })
@@ -279,19 +289,17 @@ export function EntryTagPanel({
   }
 
   function getCurrentTagColor(tagId: string): string {
-    return catalogTags[tagId]?.color ?? currentColors[tagId] ?? DEFAULT_TAG_COLOR
+    return currentColors[tagId] ?? DEFAULT_TAG_COLOR
   }
 
   function getCurrentTagName(tagId: string): string {
-    return catalogTags[tagId]?.name ?? tagId
+    return tagId
   }
 
   function handleTagContextMenu(tagId: string, event: React.MouseEvent) {
     event.preventDefault()
     event.stopPropagation()
-    const catalogEntry = diaryCatalog
-      ? diaryCatalog.activities[tagId] ?? diaryCatalog.people[tagId] ?? diaryCatalog.pointsOfInterest[tagId]
-      : undefined
+    const catalogEntry = manager.getCatalogSection(diaryCatalog)[tagId]
     const dates = catalogEntry?.entries ?? []
 
     const items: ContextMenuItem[] = [
@@ -302,7 +310,7 @@ export function EntryTagPanel({
   }
 
   return (
-    <div className={`compact-panel tag-panel ${manager.panelClassName}`.trim()}>
+    <div className="compact-panel tag-panel">
       <div className="compact-title">
         {icon}
         {manager.itemLabelPlural}
@@ -391,7 +399,7 @@ export function EntryTagPanel({
                       {group.tags.map((tag) => (
                         <ActivityChipButton
                           color={tag.color}
-                          key={tag.name}
+                          key={tag.key}
                           name={tag.name}
                           pinned={tag.pinned}
                           onClick={() => addTag(tag.name, tag.color)}

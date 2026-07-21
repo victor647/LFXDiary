@@ -156,12 +156,6 @@ export function EntryEditor({
     })
   }
 
-  const tagDisplayNames = useMemo(() => {
-    const names: Record<string, string> = {}
-    for (const p of peopleOptions) names[p.id] = p.name
-    return names
-  }, [peopleOptions])
-
   return (
     <section className="entry-body">
       <label>Entry</label>
@@ -173,7 +167,6 @@ export function EntryEditor({
             personColors={personColors}
             pointsOfInterest={pointsOfInterest}
             pointOfInterestColors={pointOfInterestColors}
-            tagDisplayNames={tagDisplayNames}
           />
         </div>
         <textarea
@@ -316,14 +309,12 @@ function RichTextContent({
   personColors,
   pointsOfInterest,
   pointOfInterestColors,
-  tagDisplayNames,
 }: {
   content: string
   people: string[]
   personColors: Record<string, string>
   pointsOfInterest: string[]
   pointOfInterestColors: Record<string, string>
-  tagDisplayNames?: Record<string, string>
 }) {
   const tokens = tokenizeRichTextTags(content, people, pointsOfInterest)
 
@@ -336,7 +327,6 @@ function RichTextContent({
         const color = token.kind === 'person'
           ? personColors[token.tagId] ?? DEFAULT_TAG_COLOR
           : pointOfInterestColors[token.tagId] ?? DEFAULT_TAG_COLOR
-        const displayName = tagDisplayNames?.[token.tagId] ?? token.tagId
 
         return (
           <span
@@ -348,7 +338,7 @@ function RichTextContent({
               color: getTagTextColor(color),
             }}
           >
-            {displayName}
+            {token.tagId}
           </span>
         )
       })}

@@ -10,24 +10,24 @@ export type TagColorGroup<TTag extends DiaryTag> = {
   tags: TTag[]
 }
 
-/** GUID → tag settings (settings catalog) */
-type CatalogTagRecord = Record<TagId, { name: string; color: string; pinned?: boolean }>
-/** GUID → tag with entry references (diary catalog) */
-type CatalogReferenceTagRecord = Record<TagId, { name: string; color: string; pinned?: boolean; entries: string[] }>
+/** GUID → tag definition in AppSettings (color, pinned) */
+type TagDefinitionsRecord = Record<TagId, { color: string; pinned?: boolean }>
+/** GUID → tag record in DiaryCatalog (color, pinned, entry references) */
+type CatalogTagRecord = Record<TagId, { color: string; pinned?: boolean; entries: string[] }>
 
 export abstract class DiaryTag {
   abstract readonly kind: 'activity' | 'person' | 'location' | 'pointOfInterest'
 
-  /** GUID — stable identity; never changes on rename or category move */
+  /** The tag key — also the display name */
   readonly key: TagId
-  readonly name: string
+  /** Display name (same as key) */
+  get name(): string { return this.key }
   readonly color: string
   readonly count: number
   readonly pinned: boolean
 
-  protected constructor(key: TagId, name: string, color: string, count: number, pinned = false) {
+  protected constructor(key: TagId, color: string, count: number, pinned = false) {
     this.key = key
-    this.name = name
     this.color = color
     this.count = count
     this.pinned = pinned
@@ -37,32 +37,36 @@ export abstract class DiaryTag {
 export class ActivityTag extends DiaryTag {
   readonly kind = 'activity'
 
-  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
-    super(id, name, color, count, pinned)
+  constructor(id: TagId, color: string, count = 0, pinned = false) {
+    super(id, color, count, pinned)
   }
 }
 
 export class PersonTag extends DiaryTag {
   readonly kind = 'person'
 
-  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
-    super(id, name, color, count, pinned)
+  constructor(id: TagId, color: string, count = 0, pinned = false) {
+    super(id, color, count, pinned)
   }
 }
 
 export class LocationTag extends DiaryTag {
   readonly kind = 'location'
+  readonly displayName: string
 
-  constructor(key: string, name: string, color: string, count = 0, pinned = false) {
-    super(key, name, color, count, pinned)
+  constructor(key: string, displayName: string, color: string, count = 0, pinned = false) {
+    super(key, color, count, pinned)
+    this.displayName = displayName
   }
+
+  get name(): string { return this.displayName }
 }
 
 export class PointOfInterestTag extends DiaryTag {
   readonly kind = 'pointOfInterest'
 
-  constructor(id: TagId, name: string, color: string, count = 0, pinned = false) {
-    super(id, name, color, count, pinned)
+  constructor(id: TagId, color: string, count = 0, pinned = false) {
+    super(id, color, count, pinned)
   }
 }
 
@@ -92,21 +96,25 @@ export abstract class DiaryTagManager<TTag extends DiaryTag> {
 
 export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTag | PointOfInterestTag> extends DiaryTagManager<TTag> {
   abstract readonly maxTags: number
-  abstract readonly panelClassName: string
 
-  abstract createTag(id: TagId, name: string, color: string, count?: number, pinned?: boolean): TTag
+  abstract createTag(id: TagId, color: string, count?: number, pinned?: boolean): TTag
   abstract getEntryTagIds(entry: DiaryEntry): TagId[]
   abstract getEntryColors(entry: DiaryEntry): Record<TagId, string>
-  abstract getCatalog(settings: AppSettings): CatalogTagRecord
+  abstract getCatalog(settings: AppSettings): TagDefinitionsRecord
   abstract getColorNames(settings: AppSettings): Record<string, string>
   abstract getColorGroupName(settings: AppSettings, color: string): string
-  abstract setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings
+  abstract setCatalog(settings: AppSettings, catalog: TagDefinitionsRecord): AppSettings
   abstract setColorGroupName(settings: AppSettings, color: string, name: string): AppSettings
   abstract updateEntryTag(entry: DiaryEntry, oldTagId: TagId, nextTagId: TagId, color: string): DiaryEntry
   abstract buildDraftPatch(ids: TagId[], colors: Record<TagId, string>): Partial<DiaryEntry>
 
-  resolveTagName(settings: AppSettings, id: TagId): string {
-    return this.getCatalog(settings)[id]?.name ?? id
+  /** Return the section of DiaryCatalog that this manager owns */
+  abstract getCatalogSection(catalog: DiaryCatalog): CatalogTagRecord
+  /** Return a new DiaryCatalog with the given section replaced */
+  abstract setCatalogSection(catalog: DiaryCatalog, section: CatalogTagRecord): DiaryCatalog
+
+  resolveTagName(_settings: AppSettings, id: TagId): string {
+    return id
   }
 
   collect(entries: DiaryEntry[], settings: AppSettings): TTag[] {
@@ -114,7 +122,7 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     const tags = new Map<TagId, TTag>()
 
     for (const [id, tag] of Object.entries(catalog)) {
-      tags.set(id, this.createTag(id, tag.name, tag.color || DEFAULT_TAG_COLOR, 0, tag.pinned === true))
+      tags.set(id, this.createTag(id, tag.color || DEFAULT_TAG_COLOR, 0, tag.pinned === true))
     }
 
     for (const entry of entries) {
@@ -124,7 +132,6 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
         const current = tags.get(id)
         tags.set(id, this.createTag(
           id,
-          current?.name ?? catalog[id]?.name ?? id,
           current?.color ?? entryColors[id] ?? DEFAULT_TAG_COLOR,
           (current?.count ?? 0) + 1,
           current?.pinned === true,
@@ -135,14 +142,13 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     return Array.from(tags.values()).sort(compareTags)
   }
 
-  collectFromCatalog(catalogTags: CatalogReferenceTagRecord, settings: AppSettings): TTag[] {
+  collectFromCatalog(catalogTags: CatalogTagRecord, settings: AppSettings): TTag[] {
     const catalog = this.getCatalog(settings)
     const tags = new Map<TagId, TTag>()
 
     for (const [id, tag] of Object.entries(catalogTags)) {
       tags.set(id, this.createTag(
         id,
-        tag.name,
         tag.color || DEFAULT_TAG_COLOR,
         tag.entries.length,
         tag.pinned === true,
@@ -153,7 +159,6 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
       const current = tags.get(id)
       tags.set(id, this.createTag(
         id,
-        tag.name || current?.name || id,
         tag.color || current?.color || DEFAULT_TAG_COLOR,
         current?.count ?? 0,
         tag.pinned === true || current?.pinned === true,
@@ -190,8 +195,8 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     )
   }
 
-  updateCatalog(catalog: CatalogTagRecord, oldTagId: TagId, nextTagId: TagId, color: string): CatalogTagRecord {
-    const nextCatalog: CatalogTagRecord = {}
+  updateCatalog(catalog: TagDefinitionsRecord, oldTagId: TagId, nextTagId: TagId, color: string): TagDefinitionsRecord {
+    const nextCatalog: TagDefinitionsRecord = {}
     const oldEntry = catalog[oldTagId]
     const nextEntry = catalog[nextTagId]
     const oldPinned = oldEntry?.pinned === true
@@ -204,7 +209,6 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
 
     if (nextTagId) {
       nextCatalog[nextTagId] = {
-        name: nextEntry?.name ?? oldEntry?.name ?? nextTagId,
         color,
         pinned: oldPinned || nextPinned,
       }
@@ -213,8 +217,8 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     return nextCatalog
   }
 
-  updateCatalogPin(catalog: CatalogTagRecord, tagId: TagId, pinned: boolean): CatalogTagRecord {
-    const nextCatalog: CatalogTagRecord = {}
+  updateCatalogPin(catalog: TagDefinitionsRecord, tagId: TagId, pinned: boolean): TagDefinitionsRecord {
+    const nextCatalog: TagDefinitionsRecord = {}
 
     for (const [id, item] of Object.entries(catalog)) {
       nextCatalog[id] = id === tagId
@@ -225,9 +229,9 @@ export abstract class CatalogDiaryTagManager<TTag extends ActivityTag | PersonTa
     return nextCatalog
   }
 
-  deleteCatalogTags(catalog: CatalogTagRecord, tagIds: TagId[]): CatalogTagRecord {
+  deleteCatalogTags(catalog: TagDefinitionsRecord, tagIds: TagId[]): TagDefinitionsRecord {
     const removeSet = new Set(tagIds.filter(Boolean))
-    const nextCatalog: CatalogTagRecord = {}
+    const nextCatalog: TagDefinitionsRecord = {}
 
     for (const [id, tag] of Object.entries(catalog)) {
       if (!removeSet.has(id))
@@ -260,14 +264,13 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
   readonly itemLabel = 'Activity'
   readonly itemLabelPlural = 'Activities'
   readonly maxTags = MAX_ACTIVITIES_PER_ENTRY
-  readonly panelClassName = 'activities-panel'
 
   normalizeName(value: string): string {
     return sanitizeTag(value)
   }
 
-  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): ActivityTag {
-    return new ActivityTag(id, name, color, count, pinned)
+  createTag(id: TagId, color: string, count = 0, pinned = false): ActivityTag {
+    return new ActivityTag(id, color, count, pinned)
   }
 
   getEntryTagIds(entry: DiaryEntry): TagId[] {
@@ -278,7 +281,7 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
     return entry.tagColors ?? {}
   }
 
-  getCatalog(settings: AppSettings): CatalogTagRecord {
+  getCatalog(settings: AppSettings): TagDefinitionsRecord {
     return settings.activityTags
   }
 
@@ -290,7 +293,7 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
     return settings.activityColorGroupNames[color] || color
   }
 
-  setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings {
+  setCatalog(settings: AppSettings, catalog: TagDefinitionsRecord): AppSettings {
     return {
       ...settings,
       activityTags: catalog,
@@ -317,20 +320,27 @@ export class ActivityTagManager extends CatalogDiaryTagManager<ActivityTag> {
       tagColors: colors,
     }
   }
+
+  getCatalogSection(catalog: DiaryCatalog): CatalogTagRecord {
+    return catalog.activities
+  }
+
+  setCatalogSection(catalog: DiaryCatalog, section: CatalogTagRecord): DiaryCatalog {
+    return { ...catalog, activities: section as DiaryCatalog['activities'] }
+  }
 }
 
 export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
   readonly itemLabel = 'Person'
   readonly itemLabelPlural = 'People'
   readonly maxTags = MAX_PEOPLE_PER_ENTRY
-  readonly panelClassName = 'people-panel'
 
   normalizeName(value: string): string {
     return normalizePersonTag(value)
   }
 
-  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): PersonTag {
-    return new PersonTag(id, name, color, count, pinned)
+  createTag(id: TagId, color: string, count = 0, pinned = false): PersonTag {
+    return new PersonTag(id, color, count, pinned)
   }
 
   getEntryTagIds(entry: DiaryEntry): TagId[] {
@@ -341,7 +351,7 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
     return entry.personColors ?? {}
   }
 
-  getCatalog(settings: AppSettings): CatalogTagRecord {
+  getCatalog(settings: AppSettings): TagDefinitionsRecord {
     return settings.peopleTags
   }
 
@@ -353,7 +363,7 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
     return settings.personColorGroupNames[color] || color
   }
 
-  setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings {
+  setCatalog(settings: AppSettings, catalog: TagDefinitionsRecord): AppSettings {
     return {
       ...settings,
       peopleTags: catalog,
@@ -380,20 +390,27 @@ export class PersonTagManager extends CatalogDiaryTagManager<PersonTag> {
       personColors: colors,
     }
   }
+
+  getCatalogSection(catalog: DiaryCatalog): CatalogTagRecord {
+    return catalog.people
+  }
+
+  setCatalogSection(catalog: DiaryCatalog, section: CatalogTagRecord): DiaryCatalog {
+    return { ...catalog, people: section as DiaryCatalog['people'] }
+  }
 }
 
 export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInterestTag> {
   readonly itemLabel = 'Point of Interest'
   readonly itemLabelPlural = 'Points of Interest'
   readonly maxTags = MAX_POINTS_OF_INTEREST_PER_ENTRY
-  readonly panelClassName = 'poi-panel'
 
   normalizeName(value: string): string {
     return normalizePointOfInterestTag(value)
   }
 
-  createTag(id: TagId, name: string, color: string, count = 0, pinned = false): PointOfInterestTag {
-    return new PointOfInterestTag(id, name, color, count, pinned)
+  createTag(id: TagId, color: string, count = 0, pinned = false): PointOfInterestTag {
+    return new PointOfInterestTag(id, color, count, pinned)
   }
 
   getEntryTagIds(entry: DiaryEntry): TagId[] {
@@ -404,7 +421,7 @@ export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInt
     return entry.pointOfInterestColors ?? {}
   }
 
-  getCatalog(settings: AppSettings): CatalogTagRecord {
+  getCatalog(settings: AppSettings): TagDefinitionsRecord {
     return settings.pointOfInterestTags
   }
 
@@ -416,7 +433,7 @@ export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInt
     return settings.pointOfInterestColorGroupNames[color] || color
   }
 
-  setCatalog(settings: AppSettings, catalog: CatalogTagRecord): AppSettings {
+  setCatalog(settings: AppSettings, catalog: TagDefinitionsRecord): AppSettings {
     return {
       ...settings,
       pointOfInterestTags: catalog,
@@ -443,6 +460,14 @@ export class PointOfInterestTagManager extends CatalogDiaryTagManager<PointOfInt
       pointOfInterestColors: colors,
     }
   }
+
+  getCatalogSection(catalog: DiaryCatalog): CatalogTagRecord {
+    return catalog.pointsOfInterest
+  }
+
+  setCatalogSection(catalog: DiaryCatalog, section: CatalogTagRecord): DiaryCatalog {
+    return { ...catalog, pointsOfInterest: section as DiaryCatalog['pointsOfInterest'] }
+  }
 }
 
 export class LocationTagManager extends DiaryTagManager<LocationTag> {
@@ -463,7 +488,7 @@ export class LocationTagManager extends DiaryTagManager<LocationTag> {
 
         locations.set(key, new LocationTag(
           key,
-          current?.name ?? city.name,
+          current?.displayName ?? city.name,
           current?.color ?? entry.locationColors[city.id] ?? DEFAULT_LOCATION_COLOR,
           (current?.count ?? 0) + 1,
         ))

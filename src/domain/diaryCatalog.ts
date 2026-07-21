@@ -8,7 +8,7 @@ export const YEAR_CATALOG_FILE_NAME = 'lfx-diary-year-catalog.json'
 export const WEATHER_CODES_FILE_NAME = 'weather-codes.json'
 
 type CatalogLocationMapValue = { city: City; color: string; pinned?: boolean; entries: Set<string> }
-type CatalogNamedTagMapValue = { name: string; color: string; pinned?: boolean; entries: Set<string> }
+type CatalogNamedTagMapValue = { color: string; pinned?: boolean; entries: Set<string> }
 
 export function buildDiaryCatalog(entries: DiaryEntry[]): DiaryCatalog {
   const locations = new Map<string, CatalogLocationMapValue>()
@@ -243,6 +243,164 @@ function buildDiaryCatalogFromExisting(catalog: DiaryCatalog, entry: DiaryEntry)
       locations: {},
     },
   }
+}
+
+export const UNWANTED_TAG_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const COORD_TAG_PATTERN = /^-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+$/
+
+function isUnwantedKey(key: string): boolean {
+  return UNWANTED_TAG_PATTERN.test(key) || COORD_TAG_PATTERN.test(key)
+}
+
+/** Remove tag entries whose keys are UUIDs or coordinate strings */
+export function cleanUnwantedTags(catalog: DiaryCatalog): DiaryCatalog {
+  const filterSection = <T>(section: Record<string, T>): Record<string, T> => {
+    const next: Record<string, T> = {}
+    for (const [key, value] of Object.entries(section)) {
+      if (!isUnwantedKey(key))
+        next[key] = value
+    }
+    return next
+  }
+
+  const nextActivities = filterSection(catalog.activities)
+  const nextPeople = filterSection(catalog.people)
+  const nextPointsOfInterest = filterSection(catalog.pointsOfInterest)
+  const nextLocations = filterSection(catalog.locations)
+
+  if (nextActivities === catalog.activities && nextPeople === catalog.people &&
+      nextPointsOfInterest === catalog.pointsOfInterest && nextLocations === catalog.locations)
+    return catalog
+
+  return {
+    ...catalog,
+    updatedAt: new Date().toISOString(),
+    activities: nextActivities,
+    people: nextPeople,
+    pointsOfInterest: nextPointsOfInterest,
+    locations: nextLocations,
+  }
+}
+
+/** Remove GUID/coordinate tag references from entries and return cleaned entries plus count */
+export function cleanEntriesFromUnwantedTags(entries: DiaryEntry[]): { entries: DiaryEntry[]; removedTags: number; removedPeople: number; removedPoi: number } {
+  let removedTags = 0
+  let removedPeople = 0
+  let removedPoi = 0
+
+  const cleaned = entries.map((entry) => {
+    const cleanField = (tags: string[], colors: Record<string, string>): { tags: string[]; colors: Record<string, string>; removed: number } => {
+      const keepTags: string[] = []
+      const keepColors: Record<string, string> = {}
+      let removed = 0
+      for (const tag of tags) {
+        if (isUnwantedKey(tag)) { removed++; continue }
+        keepTags.push(tag)
+        if (colors[tag]) keepColors[tag] = colors[tag]
+      }
+      return { tags: keepTags, colors: keepColors, removed }
+    }
+
+    const t = cleanField(entry.tags ?? [], entry.tagColors ?? {})
+    const p = cleanField(entry.people ?? [], entry.personColors ?? {})
+    const poi = cleanField(entry.pointsOfInterest ?? [], entry.pointOfInterestColors ?? {})
+
+    removedTags += t.removed
+    removedPeople += p.removed
+    removedPoi += poi.removed
+
+    if (!t.removed && !p.removed && !poi.removed) return entry
+
+    return {
+      ...entry,
+      tags: t.tags,
+      tagColors: t.colors,
+      people: p.tags,
+      personColors: p.colors,
+      pointsOfInterest: poi.tags,
+      pointOfInterestColors: poi.colors,
+      updatedAt: new Date().toISOString(),
+      isEdited: true,
+    }
+  })
+
+  return { entries: cleaned, removedTags, removedPeople, removedPoi }
+}
+
+/** Remove tag entries whose keys are UUIDs (leftovers from GUID-keyed era) */
+export function stripGuidTagKeys(catalog: DiaryCatalog): DiaryCatalog {
+  const filterGuids = <T>(section: Record<string, T>): Record<string, T> => {
+    const next: Record<string, T> = {}
+    for (const [key, value] of Object.entries(section)) {
+      if (!isUnwantedKey(key))
+        next[key] = value
+    }
+    return next
+  }
+
+  const nextActivities = filterGuids(catalog.activities)
+  const nextPeople = filterGuids(catalog.people)
+  const nextPointsOfInterest = filterGuids(catalog.pointsOfInterest)
+
+  if (nextActivities === catalog.activities && nextPeople === catalog.people && nextPointsOfInterest === catalog.pointsOfInterest)
+    return catalog
+
+  return {
+    ...catalog,
+    updatedAt: new Date().toISOString(),
+    activities: nextActivities,
+    people: nextPeople,
+    pointsOfInterest: nextPointsOfInterest,
+  }
+}
+
+/** Remove tags with zero entry references from the catalog */
+export function pruneEmptyCatalogTags(catalog: DiaryCatalog): DiaryCatalog {
+  const filterEmpty = <T extends { entries: string[] }>(section: Record<string, T>): Record<string, T> => {
+    const next: Record<string, T> = {}
+    for (const [key, tag] of Object.entries(section)) {
+      if (tag.entries.length > 0 || tag.pinned)
+        next[key] = tag
+    }
+    return next
+  }
+
+  const nextActivities = filterEmpty(catalog.activities)
+  const nextPeople = filterEmpty(catalog.people)
+  const nextPointsOfInterest = filterEmpty(catalog.pointsOfInterest)
+
+  if (nextActivities === catalog.activities && nextPeople === catalog.people && nextPointsOfInterest === catalog.pointsOfInterest)
+    return catalog
+
+  return {
+    ...catalog,
+    updatedAt: new Date().toISOString(),
+    activities: nextActivities,
+    people: nextPeople,
+    pointsOfInterest: nextPointsOfInterest,
+  }
+}
+
+/** Ensure tag names from entries exist in the catalog sections */
+export function ensureTagsInCatalog(catalog: DiaryCatalog, entries: DiaryEntry[]): DiaryCatalog {
+  let next = catalog
+
+  for (const entry of entries) {
+    for (const tag of entry.tags) {
+      if (tag && !next.activities[tag])
+        next = { ...next, activities: { ...next.activities, [tag]: { color: entry.tagColors?.[tag] ?? DEFAULT_TAG_COLOR, entries: [] } } }
+    }
+    for (const person of entry.people ?? []) {
+      if (person && !next.people[person])
+        next = { ...next, people: { ...next.people, [person]: { color: entry.personColors?.[person] ?? DEFAULT_TAG_COLOR, entries: [] } } }
+    }
+    for (const poi of entry.pointsOfInterest ?? []) {
+      if (poi && !next.pointsOfInterest[poi])
+        next = { ...next, pointsOfInterest: { ...next.pointsOfInterest, [poi]: { color: entry.pointOfInterestColors?.[poi] ?? DEFAULT_TAG_COLOR, entries: [] } } }
+    }
+  }
+
+  return next !== catalog ? { ...next, updatedAt: new Date().toISOString() } : catalog
 }
 
 export function applySettingsToDiaryCatalog(catalog: DiaryCatalog, settings: AppSettings): DiaryCatalog {
@@ -725,7 +883,6 @@ function applyNamedTagSettings(
   for (const [id, tag] of Object.entries(settingsTags)) {
     const current = tags.get(id)
     tags.set(id, {
-      name: tag.name || current?.name || id,
       color: tag.color || current?.color || DEFAULT_TAG_COLOR,
       pinned: tag.pinned === true,
       entries: current?.entries ?? [],
@@ -734,9 +891,8 @@ function applyNamedTagSettings(
 
   return Object.fromEntries(
     Array.from(tags.entries())
-      .sort((a, b) => (a[1].name ?? a[0]).localeCompare(b[1].name ?? b[0]))
+      .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([id, tag]) => [id, {
-        name: tag.name ?? id,
         color: tag.color,
         pinned: tag.pinned === true,
         entries: normalizeReferences(tag.entries),
@@ -747,9 +903,8 @@ function applyNamedTagSettings(
 function getNamedTagSettings(catalogTags: DiaryCatalog['activities']): AppSettings['activityTags'] {
   return Object.fromEntries(
     Object.entries(catalogTags)
-      .sort((a, b) => (a[1].name ?? a[0]).localeCompare(b[1].name ?? b[0]))
+      .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([id, tag]) => [id, {
-        name: tag.name ?? id,
         color: tag.color || DEFAULT_TAG_COLOR,
         pinned: tag.pinned === true,
       }]),

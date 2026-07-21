@@ -10,7 +10,7 @@ import {
 import type { AppSettings, City, DiaryEntry, MoodScore, Period, RecentTag } from '../domain/types'
 import { formatCityDisplayName, searchCitiesByName } from './city'
 import { getDailyWeatherFields } from './diaryEntryHelpers'
-import { getRecentCities, getRecentPeople, getRecentPointsOfInterest, getRecentTags, normalizeLocationColors } from './entries'
+import { getRecentCities, normalizeLocationColors } from './entries'
 import { normalizeSettings } from './settings'
 import { normalizePersonTag, normalizePersonTags, normalizePointOfInterestTag, normalizePointOfInterestTags, normalizeTag, normalizeTags } from './tags'
 import { fetchWeatherSample } from './weather'
@@ -201,11 +201,11 @@ export async function createDiaryEntryFromEvernoteImport(
     ...settings,
     activityTags: {
       ...settings.activityTags,
-      ...Object.fromEntries(tagsResult.addedTags.map((tag) => [tag, { name: tag, color: DEFAULT_TAG_COLOR }])),
+      ...Object.fromEntries(tagsResult.addedTags.map((tag) => [tag, { color: DEFAULT_TAG_COLOR }])),
     },
     peopleTags: {
       ...settings.peopleTags,
-      ...Object.fromEntries(peopleResult.addedPeople.map((person) => [person, { name: person, color: DEFAULT_TAG_COLOR }])),
+      ...Object.fromEntries(peopleResult.addedPeople.map((person) => [person, { color: DEFAULT_TAG_COLOR }])),
     },
   })
 
@@ -552,40 +552,37 @@ function contentIncludesActivityTag(content: string, tag: string): boolean {
   return normalizedContent.includes(normalizedTag)
 }
 
-function getExistingActivityTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
-  const tags = new Map<string, string>()
+function getExistingActivityTags(_entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
+  const tags = new Map<string, RecentTag>()
 
-  for (const tag of getRecentTags(entries))
-    tags.set(tag.name, tag.color)
+  for (const [name, tag] of Object.entries(settings.activityTags)) {
+    if (name && !tags.has(name))
+      tags.set(name, { id: name, name, color: tag.color })
+  }
 
-  for (const [name, tag] of Object.entries(settings.activityTags))
-    tags.set(name, tag.color)
-
-  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
+  return Array.from(tags.values())
 }
 
-function getExistingPeopleTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
-  const tags = new Map<string, string>()
+function getExistingPeopleTags(_entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
+  const tags = new Map<string, RecentTag>()
 
-  for (const tag of getRecentPeople(entries))
-    tags.set(tag.name, tag.color)
+  for (const [name, tag] of Object.entries(settings.peopleTags)) {
+    if (name && !tags.has(name))
+      tags.set(name, { id: name, name, color: tag.color })
+  }
 
-  for (const [name, tag] of Object.entries(settings.peopleTags))
-    tags.set(name, tag.color)
-
-  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
+  return Array.from(tags.values())
 }
 
-function getExistingPointOfInterestTags(entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
-  const tags = new Map<string, string>()
+function getExistingPointOfInterestTags(_entries: DiaryEntry[], settings: AppSettings): RecentTag[] {
+  const tags = new Map<string, RecentTag>()
 
-  for (const tag of getRecentPointsOfInterest(entries))
-    tags.set(tag.name, tag.color)
+  for (const [name, tag] of Object.entries(settings.pointOfInterestTags)) {
+    if (name && !tags.has(name))
+      tags.set(name, { id: name, name, color: tag.color })
+  }
 
-  for (const [name, tag] of Object.entries(settings.pointOfInterestTags))
-    tags.set(name, tag.color)
-
-  return Array.from(tags.entries()).map(([name, color]) => ({ id: name, name, color }))
+  return Array.from(tags.values())
 }
 
 function extractChinesePeopleFromEnglishText(content: string): string[] {

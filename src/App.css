@@ -391,6 +391,11 @@ label {
   border-color: var(--accent, #1d3557);
 }
 
+.entry-item.multi-selected {
+  background: var(--selected-bg, #edf4f8);
+  border-color: var(--hover, #457b9d);
+}
+
 .notebook-range-label {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1230,9 +1235,7 @@ label {
 .date-panel,
 .location-panel,
 .weather-panel,
-.activities-panel,
-.people-panel,
-.poi-panel,
+.tag-panel,
 .mood-panel {
   min-width: 0;
 }
@@ -1260,13 +1263,10 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 112px;
   min-height: 26px;
   padding: 0 9px;
-  overflow: hidden;
   font-size: 12px;
   font-weight: 600;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1734,9 +1734,10 @@ label {
 
 .sync-progress-dialog {
   grid-template-columns: 48px minmax(0, 1fr);
-  align-items: center;
-  width: min(360px, calc(100vw - 32px));
+  align-items: start;
+  width: min(480px, calc(100vw - 32px));
   gap: 12px;
+  max-height: min(600px, calc(100vh - 64px));
 }
 
 .sync-progress-spinner {
@@ -1748,11 +1749,14 @@ label {
   background: var(--muted-bg, #f1f5f9);
   color: var(--accent);
   animation: sync-progress-spin 0.85s linear infinite;
+  margin-top: 4px;
 }
 
 .sync-progress-copy {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   gap: 4px;
 }
 
@@ -1806,6 +1810,81 @@ label {
   to {
     transform: rotate(360deg);
   }
+}
+
+.sync-progress-log {
+  max-height: min(360px, calc(100vh - 280px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg, #fbfcfd);
+}
+
+.sync-progress-log-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.sync-progress-log-line.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sync-progress-log-line.done {
+  color: var(--muted);
+}
+
+.sync-progress-log-line.error {
+  color: var(--error, #dc2626);
+}
+
+.sync-progress-log-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+
+.sync-progress-icon-spin {
+  animation: sync-progress-spin 0.85s linear infinite;
+}
+
+.sync-progress-error {
+  max-height: min(160px, 30vh);
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--error, #dc2626);
+  border-radius: 6px;
+  background: var(--panel-bg, #fbfcfd);
+}
+
+.sync-progress-error pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--error, #dc2626);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.sync-progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .push-success-list {

@@ -12,24 +12,24 @@ export function getTagFilterOptions(catalog: DiaryCatalog, settings: AppSettings
       color: location.color,
       colorLabel: locationTagManager.getColorGroupName(settings, location.color),
     })),
-    ...Object.entries(catalog.activities).map(([name, activity]) => ({
+    ...Object.entries(catalog.activities).map(([tagId, activity]) => ({
       kind: 'activity' as const,
-      value: name,
-      name,
+      value: tagId,
+      name: activity.name,
       color: activity.color,
       colorLabel: activityTagManager.getColorGroupName(settings, activity.color),
     })),
-    ...Object.entries(catalog.people).map(([name, person]) => ({
+    ...Object.entries(catalog.people).map(([tagId, person]) => ({
       kind: 'person' as const,
-      value: name,
-      name,
+      value: tagId,
+      name: person.name,
       color: person.color,
       colorLabel: personTagManager.getColorGroupName(settings, person.color),
     })),
-    ...Object.entries(catalog.pointsOfInterest).map(([name, pointOfInterest]) => ({
+    ...Object.entries(catalog.pointsOfInterest).map(([tagId, pointOfInterest]) => ({
       kind: 'pointOfInterest' as const,
-      value: name,
-      name,
+      value: tagId,
+      name: pointOfInterest.name,
       color: pointOfInterest.color,
       colorLabel: pointOfInterestTagManager.getColorGroupName(settings, pointOfInterest.color),
     })),

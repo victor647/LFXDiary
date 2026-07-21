@@ -17,6 +17,7 @@ type MetadataEditorProps = {
   onUpdateDraftIfCurrent: (entryId: string, diaryDate: string, patch: Partial<DiaryEntry>) => void
   onDraftChange: (draft: DiaryEntry) => void
   onEntriesChange: (entries: DiaryEntry[]) => void
+  onDiaryCatalogChange: (catalog: DiaryCatalog) => void
   onStatusChange: (message: string) => void
   onErrorLog: (log: string) => void
   onNavigateDate?: (date: string) => void
@@ -32,6 +33,7 @@ export function MetadataEditor({
   onUpdateDraftIfCurrent,
   onDraftChange,
   onEntriesChange,
+  onDiaryCatalogChange,
   onStatusChange,
   onErrorLog,
   onNavigateDate,
@@ -59,6 +61,7 @@ export function MetadataEditor({
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
           onEntriesChange={onEntriesChange}
+          onDiaryCatalogChange={onDiaryCatalogChange}
           onStatusChange={onStatusChange}
         />
         <ActivitiesPanel
@@ -71,6 +74,7 @@ export function MetadataEditor({
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
           onEntriesChange={onEntriesChange}
+          onDiaryCatalogChange={onDiaryCatalogChange}
           onStatusChange={onStatusChange}
         />
         <PeoplePanel
@@ -83,6 +87,7 @@ export function MetadataEditor({
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
           onEntriesChange={onEntriesChange}
+          onDiaryCatalogChange={onDiaryCatalogChange}
           onStatusChange={onStatusChange}
         />
         <PointOfInterestPanel
@@ -95,6 +100,7 @@ export function MetadataEditor({
           onUpdateDraft={onUpdateDraft}
           onDraftChange={onDraftChange}
           onEntriesChange={onEntriesChange}
+          onDiaryCatalogChange={onDiaryCatalogChange}
           onStatusChange={onStatusChange}
         />
       </div>

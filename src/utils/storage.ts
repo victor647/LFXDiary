@@ -8,7 +8,6 @@ const STORAGE_KEYS = [
   'lfx-diary.settings.v1',
   'lfx-diary.catalog.v1',
   'lfx-diary.month-index.v1',
-  'lfx-diary.guid-migration.v1',
 ] as const
 
 function getElectronAPI() {

@@ -13,7 +13,7 @@ export type DiarySyncAdapter = {
   pushEntries: (entries: DiaryEntry[], settings: AppSettings, catalogEntries: DiaryEntry[], onProgress?: DiarySyncProgressCallback) => Promise<void>
   pullEntries: (settings: AppSettings, notebookKey?: string, onProgress?: DiarySyncProgressCallback) => Promise<DiaryEntry[]>
   pullNotebookEntries: (settings: AppSettings, notebookKeys: string[], options?: DiaryPullOptions) => Promise<DiaryEntry[]>
-  deleteEntry: (entry: DiaryEntry, settings: AppSettings, catalogEntries: DiaryEntry[]) => Promise<void>
+  pullEntry: (settings: AppSettings, entry: DiaryEntry, onProgress?: DiarySyncProgressCallback) => Promise<DiaryEntry | null>
   pushCatalog: (catalog: DiaryCatalog, settings: AppSettings, onProgress?: DiarySyncProgressCallback) => Promise<void>
   pullCatalog: (settings: AppSettings, onProgress?: DiarySyncProgressCallback) => Promise<DiaryCatalog | null>
   getPullSource: (settings: AppSettings, notebookKey?: string) => string
@@ -28,7 +28,7 @@ async function getGitSyncAdapter(): Promise<DiarySyncAdapter> {
     pushEntries: gitSync.pushEntriesToGit,
     pullEntries: gitSync.pullEntriesFromGit,
     pullNotebookEntries: (settings, notebookKeys, options) => gitSync.pullNotebookEntriesFromGit(settings, notebookKeys, options),
-    deleteEntry: gitSync.deleteEntryFromGit,
+    pullEntry: gitSync.pullEntryFromGit,
     pushCatalog: gitSync.pushDiaryCatalogToGit,
     pullCatalog: gitSync.pullDiaryCatalogFromGit,
     getPullSource: gitSync.getGitDisplayTarget,
@@ -44,7 +44,7 @@ async function getNasSyncAdapter(): Promise<DiarySyncAdapter> {
     pushEntries: synology.uploadEntriesToSynology,
     pullEntries: synology.downloadEntriesFromSynology,
     pullNotebookEntries: (settings, notebookKeys, options) => synology.downloadNotebookEntriesFromSynology(settings, notebookKeys, options),
-    deleteEntry: synology.deleteEntryFromSynology,
+    pullEntry: synology.pullEntryFromSynology,
     pushCatalog: synology.uploadDiaryCatalogToSynology,
     pullCatalog: synology.downloadDiaryCatalogFromSynology,
     getPullSource: (settings, notebookKey) => notebookKey ? getNotebookMarkdownFolder(settings.markdownFolder, notebookKey) : settings.markdownFolder,

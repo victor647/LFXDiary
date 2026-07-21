@@ -2,9 +2,9 @@ import type { City, DiaryEntry } from '../domain/types'
 import { getDailyWeatherFields, getWeightedDailyPrecipitationMm } from '../domain/weatherSummary'
 export { getDailyWeatherFields, getWeightedDailyPrecipitationMm }
 import { updateEntryActivity, updateEntryPerson } from '../domain/entryTags'
-import { formatCityDisplayName } from './city'
 import { upsertEntry } from './entries'
 export { updateEntryActivity, updateEntryPerson }
+export { getLocationTagKey as getLocationNameKey } from '../domain/tagModels'
 
 export function clampMood(value: number): number {
   if (Number.isNaN(value))
@@ -205,10 +205,6 @@ export function mergeEntryLocationCity(entry: DiaryEntry, sourceLocationKey: str
     updatedAt: new Date().toISOString(),
     isEdited: true,
   }
-}
-
-export function getLocationNameKey(city: City): string {
-  return city.name.trim().toLowerCase() || formatCityDisplayName(city).toLowerCase()
 }
 
 export function isEntryUnsynced(entry: DiaryEntry): boolean {
